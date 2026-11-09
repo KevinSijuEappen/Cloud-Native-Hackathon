@@ -11,7 +11,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Hairlines } from '../../../components/Hairlines';
 import { theme } from '../../../theme';
 import type { EventItem } from '../events';
 import {
@@ -26,7 +25,7 @@ import {
 type Step = 'preview' | 'details' | 'role' | 'confirm' | 'edit' | 'presenting' | 'saved';
 
 const SITUATIONS: WorkSituation[] = ['working', 'student', 'looking'];
-const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.88;
+const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.76;
 
 export function EventSheet({
   event,
@@ -111,9 +110,8 @@ export function EventSheet({
 
   return (
     <View style={styles.scrim}>
-      <Hairlines />
       <Pressable accessibilityLabel="Close event" style={StyleSheet.absoluteFill} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.centerStage} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.sheet}>
           <ScrollView
             keyboardShouldPersistTaps="handled"
@@ -121,7 +119,9 @@ export function EventSheet({
             style={{ maxHeight: SHEET_MAX_HEIGHT }}
             contentContainerStyle={styles.scroll}
           >
-            <View style={styles.handle} />
+            <Pressable accessibilityRole="button" accessibilityLabel="Close event" onPress={onClose} style={styles.handle}>
+              <Text style={styles.handleMark}>×</Text>
+            </Pressable>
             {step !== 'preview' && step !== 'saved' ? (
               <Pressable accessibilityRole="button" onPress={goBack} hitSlop={8} style={styles.backRow}>
                 <Text style={styles.backText}>Back</Text>
@@ -379,10 +379,12 @@ function titlePlaceholder(situation: WorkSituation): string {
 }
 
 const styles = StyleSheet.create({
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.lineStrong },
-  scroll: { paddingHorizontal: 24, paddingBottom: 28 },
-  handle: { alignSelf: 'center', width: 36, height: StyleSheet.hairlineWidth, backgroundColor: theme.lineStrong, marginTop: 12, marginBottom: 10 },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,2,9,0.68)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 36 },
+  centerStage: { width: '100%', maxWidth: 480, maxHeight: '100%', justifyContent: 'center' },
+  sheet: { maxHeight: '100%', overflow: 'hidden', borderRadius: 28, backgroundColor: 'rgba(24,20,36,0.94)', borderWidth: 1, borderColor: 'rgba(190,174,255,0.3)', shadowColor: '#9B78FF', shadowOpacity: 0.28, shadowRadius: 28, elevation: 16 },
+  scroll: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 26 },
+  handle: { alignSelf: 'flex-end', width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', marginTop: 0, marginBottom: 12 },
+  handleMark: { color: theme.muted, fontSize: 19, lineHeight: 27, textAlign: 'center' },
   backRow: { alignSelf: 'flex-start', marginBottom: 8, marginTop: 6 },
   backText: { color: theme.muted, fontSize: 13, fontWeight: '400', letterSpacing: 0.4 },
   swatch: { width: 36, height: 36, borderRadius: 18, marginTop: 10, marginBottom: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.7)' },

@@ -59,7 +59,9 @@ export function WelcomeScreen({ onComplete }: { onComplete: (profile: ContactPro
           <Logo size={36} />
           <Text style={styles.brand}>CONVERGENCE</Text>
         </View>
-        <Text style={styles.heading}>A few details for people who want to reach you.</Text>
+        <Text style={styles.eyebrow}>YOUR PROFILE</Text>
+        <Text style={styles.heading}>Make it easier to connect.</Text>
+        <Text style={styles.copy}>Add a little context so people you meet at events know what you do and what you’re into.</Text>
 
         <Field label="Job title" value={profile.jobTitle} placeholder="Product designer" onChangeText={(value) => setField('jobTitle', value)} />
         <Field label="Company or student" value={profile.company} placeholder="Northwind, or your school" onChangeText={(value) => setField('company', value)} />
@@ -70,7 +72,7 @@ export function WelcomeScreen({ onComplete }: { onComplete: (profile: ContactPro
         <Pressable accessibilityRole="button" disabled={saving} onPress={save} style={[styles.button, saving && styles.buttonDisabled]}>
           {saving ? <ActivityIndicator color={theme.fg} /> : (
             <>
-              <Text style={styles.buttonText}>Continue</Text>
+              <Text style={styles.buttonText}>Save and explore</Text>
               <Text style={styles.buttonMark}>→</Text>
             </>
           )}
@@ -112,6 +114,8 @@ const styles = StyleSheet.create({
   brandGroup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   brand: { color: theme.fg, fontSize: 11, fontWeight: '500', letterSpacing: 1.8 },
   heading: { color: theme.fg, fontSize: 36, lineHeight: 40, fontWeight: '300', letterSpacing: -0.8, marginTop: 36 },
+  eyebrow: { color: '#B9A6FF', fontSize: 10, fontWeight: '600', letterSpacing: 1.8, marginTop: 34 },
+  copy: { color: theme.muted, fontSize: 15, lineHeight: 22, marginTop: 12, marginBottom: 8 },
   label: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6, marginTop: 26 },
   input: { minHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.lineStrong, paddingHorizontal: 0, color: theme.fg, fontSize: 18, fontWeight: '300' },
   error: { color: theme.danger, fontSize: 14, lineHeight: 20, marginTop: 16 },
