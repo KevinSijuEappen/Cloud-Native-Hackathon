@@ -22,6 +22,8 @@ import { Hairlines } from '../../../components/Hairlines';
 import { Logo } from '../../../components/Logo';
 import { theme } from '../../../theme';
 import { EVENTS } from '../events';
+import { DirectorySearch } from '../../search/DirectorySearch';
+import { fetchEvents } from '../../search/client';
 import { EventSheet } from './EventSheet';
 
 const { width, height } = Dimensions.get('window');
@@ -31,8 +33,10 @@ export function JourneyScreen() {
   const { user } = useUser();
   const [launched, setLaunched] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [events, setEvents] = useState(EVENTS);
+  const [query, setQuery] = useState('');
   const plans = readEventPlans(user?.unsafeMetadata);
-  const selected = EVENTS.find((event) => event.id === selectedId) ?? null;
+  const selected = events.find((event) => event.id === selectedId) ?? null;
   const shipY = useRef(new Animated.Value(0)).current;
   const starsOpacity = useRef(new Animated.Value(0.55)).current;
 
@@ -51,6 +55,10 @@ export function JourneyScreen() {
       if (gesture.dy < -56) launch();
     },
   }), []);
+
+  useEffect(() => {
+    fetchEvents().then(setEvents).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!launched) return;
@@ -93,7 +101,7 @@ export function JourneyScreen() {
             <Text style={styles.brand}>CONVERGENCE</Text>
           </View>
           <View style={styles.topActions}>
-            <Text style={styles.counter}>{launched ? '4 DESTINATIONS' : 'READY TO EXPLORE'}</Text>
+            <Text style={styles.counter}>{launched ? `${events.length} DESTINATIONS` : 'READY TO EXPLORE'}</Text>
             <UserButton userProfileProps={{ customPages: accountPages }} />
           </View>
         </View>
@@ -133,12 +141,13 @@ export function JourneyScreen() {
             <View style={styles.mapHeader}>
               <Text style={styles.kicker}>A FEW PLACES TO START</Text>
               <Text style={styles.mapTitle}>Find your next orbit.</Text>
-              <Text style={styles.mapSub}>Tap an event to see what’s happening.</Text>
+              <Text style={styles.mapSub}>Search a topic, or tap an event.</Text>
             </View>
-            <View style={styles.orbitMap}>
+            <DirectorySearch query={query} onQuery={setQuery} onSelectEvent={setSelectedId} />
+            {query.trim() ? null : <View style={styles.orbitMap}>
               <View style={styles.orbitLine} />
               <View style={[styles.orbitLine, styles.orbitLineSmall]} />
-              {EVENTS.map((event, index) => {
+              {events.map((event, index) => {
                 const plan = plans.find((item) => item.eventId === event.id);
                 return (
                   <Pressable
@@ -172,9 +181,9 @@ export function JourneyScreen() {
               <Animated.View style={[styles.shipFloat, { transform: [{ translateY: shipY }] }]}>
                 <Logo size={28} />
               </Animated.View>
-            </View>
+            </View>}
             <View style={styles.bottomHint}>
-              <Text style={styles.bottomHintText}>4 EVENTS TO DISCOVER</Text>
+              <Text style={styles.bottomHintText}>{events.length} EVENTS TO DISCOVER</Text>
               <Pressable onPress={() => setLaunched(false)} hitSlop={10}>
                 <Text style={styles.backHint}>BACK TO START</Text>
               </Pressable>
@@ -211,6 +220,14 @@ export function JourneyScreen() {
                     time: time ?? '',
                   },
                 },
+              },
+            });
+          }}
+          onLeave={async () => {
+            if (!user) throw new Error('Signed out');
+            await user.updateMetadata({
+              unsafeMetadata: {
+                eventPlans: { [selected.id]: null },
               },
             });
           }}

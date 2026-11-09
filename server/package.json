@@ -1,0 +1,11 @@
+{
+  "name": "convergence-search",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.15.3"
+  }
+}

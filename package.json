@@ -7,7 +7,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "search": "npm start --prefix server"
   },
   "dependencies": {
     "@clerk/expo": "^4.15.1",

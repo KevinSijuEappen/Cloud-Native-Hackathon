@@ -23,7 +23,7 @@ import {
   type WorkSituation,
 } from '../../welcome/profile';
 
-type Step = 'preview' | 'details' | 'role' | 'confirm' | 'edit' | 'presenting' | 'saved';
+type Step = 'preview' | 'details' | 'role' | 'confirm' | 'edit' | 'presenting' | 'saved' | 'left';
 
 const SITUATIONS: WorkSituation[] = ['working', 'student', 'looking'];
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.88;
@@ -35,6 +35,7 @@ export function EventSheet({
   profileWasSaved,
   onClose,
   onSave,
+  onLeave,
 }: {
   event: EventItem;
   plan?: EventPlan;
@@ -47,6 +48,7 @@ export function EventSheet({
     room?: string;
     time?: string;
   }) => Promise<void>;
+  onLeave: () => Promise<void>;
 }) {
   const [step, setStep] = useState<Step>('preview');
   const [situation, setSituation] = useState<WorkSituation>(suggested?.situation ?? 'working');
@@ -57,6 +59,8 @@ export function EventSheet({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [committed, setCommitted] = useState<{ role: AttendanceRole; room: string; time: string; situation?: WorkSituation } | null>(null);
+  const [left, setLeft] = useState(false);
+  const going = !!plan && !left;
 
   const goBack = () => {
     setError('');
@@ -103,6 +107,21 @@ export function EventSheet({
     }
   };
 
+  const leaveEvent = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await onLeave();
+      setLeft(true);
+      setStep('left');
+    } catch {
+      setError('Could not update. Check your connection and try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const draftProfile = (): AttendeeProfile => ({
     situation,
     jobTitle: jobTitle.trim(),
@@ -122,7 +141,7 @@ export function EventSheet({
             contentContainerStyle={styles.scroll}
           >
             <View style={styles.handle} />
-            {step !== 'preview' && step !== 'saved' ? (
+            {step !== 'preview' && step !== 'saved' && step !== 'left' ? (
               <Pressable accessibilityRole="button" onPress={goBack} hitSlop={8} style={styles.backRow}>
                 <Text style={styles.backText}>Back</Text>
               </Pressable>
@@ -131,11 +150,11 @@ export function EventSheet({
             {step === 'preview' || step === 'details' ? (
               <>
                 <View style={styles.swatch} />
-                <Text style={styles.kicker}>{step === 'details' ? 'EVENT' : plan ? 'YOU’RE ON THE LIST' : 'DESTINATION FOUND'}</Text>
+                <Text style={styles.kicker}>{step === 'details' ? 'EVENT' : going ? 'YOU’RE ON THE LIST' : 'DESTINATION FOUND'}</Text>
                 <Text style={styles.title}>{event.name}</Text>
                 <Text style={styles.meta}>{event.date}  ·  {event.place}</Text>
                 <Text style={styles.topic}>{event.topic}</Text>
-                {plan ? <StatusLine plan={plan} /> : null}
+                {going && plan ? <StatusLine plan={plan} /> : null}
               </>
             ) : null}
 
@@ -163,6 +182,13 @@ export function EventSheet({
                   copy="Add your room and time so people can come find your session."
                   onPress={() => chooseRole('presenting')}
                 />
+                {going ? (
+                  <Choice
+                    title="I’m no longer going"
+                    copy="Take this event off your list."
+                    onPress={leaveEvent}
+                  />
+                ) : null}
               </>
             ) : null}
 
@@ -224,6 +250,15 @@ export function EventSheet({
               </>
             ) : null}
 
+            {step === 'left' ? (
+              <>
+                <View style={styles.swatch} />
+                <Text style={styles.kicker}>UNDONE</Text>
+                <Text style={styles.title}>{event.name}</Text>
+                <Text style={styles.body}>You’re no longer going.</Text>
+              </>
+            ) : null}
+
             {step === 'saved' && committed ? (
               <>
                 <View style={styles.swatch} />
@@ -241,13 +276,15 @@ export function EventSheet({
 
             {step === 'preview' ? (
               <View style={styles.actions}>
-                <Primary label={plan ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
+                <Primary label={going ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
                 <Secondary label="View event" onPress={() => setStep('details')} />
+                {going ? <Secondary label="I’m no longer going" disabled={saving} onPress={leaveEvent} /> : null}
               </View>
             ) : null}
             {step === 'details' ? (
               <View style={styles.actions}>
-                <Primary label={plan ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
+                <Primary label={going ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
+                {going ? <Secondary label="I’m no longer going" disabled={saving} onPress={leaveEvent} /> : null}
               </View>
             ) : null}
             {step === 'confirm' ? (
@@ -271,7 +308,7 @@ export function EventSheet({
                 />
               </View>
             ) : null}
-            {step === 'saved' ? (
+            {step === 'saved' || step === 'left' ? (
               <View style={styles.actions}>
                 <Primary label="Done" onPress={onClose} />
               </View>
@@ -363,9 +400,9 @@ function Primary({
   );
 }
 
-function Secondary({ label, onPress }: { label: string; onPress: () => void }) {
+function Secondary({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.action}>
+    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.action, disabled && styles.disabled]}>
       <Text style={styles.secondaryText}>{label}</Text>
       <Text style={styles.actionMark}>→</Text>
     </Pressable>
