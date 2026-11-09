@@ -3,6 +3,7 @@ import { UserButton } from '@clerk/expo/native-components';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ContactProfilePage } from '../../welcome/screens/ContactProfilePage';
 import {
+  countdownTo,
   readEventPlans,
   readStoredAttendee,
   suggestAttendee,
@@ -23,11 +24,24 @@ import {
 } from 'react-native';
 import { Hairlines } from '../../../components/Hairlines';
 import { Logo } from '../../../components/Logo';
+import { DirectorySearch } from '../../search/DirectorySearch';
 import { theme } from '../../../theme';
-import { EVENTS } from '../events';
+import { EVENTS, type EventItem } from '../events';
 import { EventSheet } from './EventSheet';
 
 const { width, height } = Dimensions.get('window');
+const TRACK = width - 48;
+const PLANET_SIZE = 128;
+const STRIDE = Math.round(PLANET_SIZE * 1.28);
+const LAST_EVENT = EVENTS.length - 1;
+const VANISH_Y = height * 0.33;
+const WARP_STREAKS = Array.from({ length: 44 }, (_, index) => ({
+  turn: (index * 137.5) % 360,
+  length: 28 + (index % 7) * 16,
+  duration: 460 + (index % 6) * 80,
+  delay: (index * 41) % 640,
+  thick: index % 6 === 0,
+}));
 const ANDROID_TOP_INSET = Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0;
 const STARS = Array.from({ length: 118 }, (_, index) => {
   const random = (seed: number) => {
@@ -43,30 +57,74 @@ const STARS = Array.from({ length: 118 }, (_, index) => {
   };
 });
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function overscroll(distance: number) {
+  return (distance * 0.46) / (1 + distance / 260);
+}
+
+function rubber(value: number) {
+  const max = LAST_EVENT * STRIDE;
+  if (value < 0) return -overscroll(-value);
+  if (value > max) return max + overscroll(value - max);
+  return value;
+}
+
+function pulse() {
+  if (Platform.OS === 'android') Vibration.vibrate(18);
+  else Vibration.vibrate();
+}
+
 export function JourneyScreen() {
   const { user } = useUser();
   const [phase, setPhase] = useState<'ready' | 'hyperdrive' | 'orbit'>('ready');
   const [orbitPage, setOrbitPage] = useState(0);
-  const [orbitIndex, setOrbitIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const plans = readEventPlans(user?.unsafeMetadata);
   const selected = EVENTS.find((event) => event.id === selectedId) ?? null;
   const starsOpacity = useRef(new Animated.Value(0.55)).current;
   const progress = useRef(new Animated.Value(0)).current;
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vibrationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const holdStarted = useRef(0);
-  const dialRotation = useRef(new Animated.Value(0)).current;
-  const dialDirection = useRef(1);
-  const dialPanStart = useRef(0);
+  const dragX = useRef(new Animated.Value(0)).current;
+  const positionRef = useRef(0);
+  const originRef = useRef(0);
+  const hapticIndex = useRef(0);
+  const settleRef = useRef<(index: number, withHaptic: boolean) => void>(() => {});
+  const trackX = dragX.interpolate({
+    inputRange: [0, STRIDE],
+    outputRange: [TRACK / 2, TRACK / 2 - STRIDE],
+  });
   const dialPanResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
-    onPanResponderGrant: () => { dialPanStart.current = 0; },
-    onPanResponderMove: (_, gesture) => { dialPanStart.current = gesture.dx; },
-    onPanResponderRelease: (_, gesture) => {
-      if (Math.abs(gesture.dx) > 36) rotateDial(gesture.dx < 0 ? 1 : -1);
+    onMoveShouldSetPanResponderCapture: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
+    onPanResponderGrant: () => {
+      dragX.stopAnimation((value) => {
+        originRef.current = value;
+        positionRef.current = value;
+      });
     },
-  }), []);
+    onPanResponderMove: (_, gesture) => {
+      const next = rubber(originRef.current - gesture.dx);
+      dragX.setValue(next);
+      const nearest = clamp(Math.round(next / STRIDE), 0, LAST_EVENT);
+      if (nearest !== hapticIndex.current) {
+        hapticIndex.current = nearest;
+        pulse();
+      }
+    },
+    onPanResponderRelease: (_, gesture) => {
+      const projected = originRef.current - gesture.dx - gesture.vx * 360;
+      const target = clamp(Math.round(rubber(projected) / STRIDE), 0, LAST_EVENT);
+      settleRef.current(target, target !== hapticIndex.current);
+    },
+    onPanResponderTerminate: () => {
+      const target = clamp(Math.round(positionRef.current / STRIDE), 0, LAST_EVENT);
+      settleRef.current(target, false);
+    },
+  }), [dragX]);
   const shipDragY = useRef(new Animated.Value(0)).current;
   const shipStartY = useRef(0);
   const shipPanResponder = useMemo(() => PanResponder.create({
@@ -99,7 +157,6 @@ export function JourneyScreen() {
   };
   const startHold = () => {
     if (phase !== 'orbit') return;
-    holdStarted.current = Date.now();
     Vibration.vibrate(120);
     vibrationTimer.current = setInterval(() => Vibration.vibrate(120), 450);
     holdTimer.current = setTimeout(() => {
@@ -117,14 +174,27 @@ export function JourneyScreen() {
       clearTimeout(holdTimer.current);
       holdTimer.current = null;
       Vibration.cancel();
-      if (Date.now() - holdStarted.current >= 300) launch();
     }
   };
-  const rotateDial = (direction: number) => {
-    dialDirection.current = direction;
-    dialRotation.setValue(0);
-    Animated.timing(dialRotation, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    setOrbitIndex((i) => (i + direction + EVENTS.length) % EVENTS.length);
+  settleRef.current = (index, withHaptic) => {
+    const next = clamp(index, 0, LAST_EVENT);
+    if (withHaptic) pulse();
+    hapticIndex.current = next;
+    Animated.spring(dragX, {
+      toValue: next * STRIDE,
+      useNativeDriver: true,
+      speed: 12,
+      bounciness: 9,
+    }).start();
+  };
+  const openFromSearch = (id: string) => {
+    const index = EVENTS.findIndex((event) => event.id === id);
+    setQuery('');
+    if (index >= 0) {
+      settleRef.current(index, true);
+      setPhase((current) => (current === 'hyperdrive' ? current : 'orbit'));
+    }
+    setSelectedId(id);
   };
   const launchPanResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) =>
@@ -133,6 +203,13 @@ export function JourneyScreen() {
       if (gesture.dy < -56) launch();
     },
   }), [phase]);
+
+  useEffect(() => {
+    const id = dragX.addListener(({ value }) => {
+      positionRef.current = value;
+    });
+    return () => dragX.removeListener(id);
+  }, [dragX]);
 
   useEffect(() => {
     if (phase !== 'hyperdrive') return undefined;
@@ -161,9 +238,6 @@ export function JourneyScreen() {
       <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
       <Hairlines />
       <Animated.View pointerEvents="none" style={[styles.starLayer, { opacity: starsOpacity }]}>
-        <View style={[styles.nebula, styles.nebulaOne]} />
-        <View style={[styles.nebula, styles.nebulaTwo]} />
-        <View style={[styles.nebula, styles.nebulaThree]} />
         {STARS.map((star, i) => (
           <View
             key={i}
@@ -176,9 +250,6 @@ export function JourneyScreen() {
                 height: star.size,
                 opacity: star.opacity,
                 backgroundColor: star.tint,
-                shadowColor: star.tint,
-                shadowOpacity: i % 13 === 0 ? 0.75 : 0.2,
-                shadowRadius: i % 13 === 0 ? 5 : 1,
               },
             ]}
           />
@@ -196,7 +267,13 @@ export function JourneyScreen() {
           </View>
         </View>
 
-        {phase === 'ready' ? (
+        {phase !== 'hyperdrive' ? (
+          <DirectorySearch query={query} onQuery={setQuery} onSelectEvent={openFromSearch} />
+        ) : null}
+
+        {phase === 'hyperdrive' ? (
+          <View style={styles.warpPlaceholder} />
+        ) : query.trim() ? null : phase === 'ready' ? (
           <>
           <View style={styles.launchArea} {...launchPanResponder.panHandlers}>
               <View style={styles.launchOrb}>
@@ -204,38 +281,34 @@ export function JourneyScreen() {
                 <View style={styles.orbitInner} />
                 <Animated.View {...shipPanResponder.panHandlers} style={[styles.launchShip, { transform: [{ translateY: shipDragY }] }]}><Ship /></Animated.View>
               </View>
-              <Text style={styles.gestureHint}>SWIPE UP TO SEARCH</Text>
+              <Text style={styles.gestureHint}>SWIPE UP TO LAUNCH</Text>
             </View>
           </>
-        ) : phase === 'hyperdrive' ? <View style={styles.warpPlaceholder} /> : (
+        ) : (
           <>
-            <View style={styles.orbitMap} {...dialPanResponder.panHandlers}>
-              <View style={styles.dialOrbitOuter} />
-              <View style={styles.dialOrbitInner} />
-              <View style={styles.dialCenterGlow} />
-              {[-1, 0, 1].map((offset) => {
-                const event = EVENTS[(orbitIndex + offset + EVENTS.length) % EVENTS.length];
-                const active = offset === 0;
-                const plan = plans.find((item) => item.eventId === event.id);
-                return (
-                  <Animated.View
-                    key={`${event.id}-${offset}`}
-                    style={[styles.dialPlanet, active ? styles.dialPlanetActive : offset < 0 ? styles.dialPlanetLeft : styles.dialPlanetRight, active && { transform: [{ scale: dialRotation.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] }) }] }]}
-                  >
-                    <Pressable accessibilityRole="button" accessibilityLabel={`Explore ${event.name}`} onPress={() => active ? setSelectedId(event.id) : rotateDial(offset)}>
-                    <View style={[styles.planet, active ? styles.planetActive : styles.planetPeek, { borderColor: event.color, shadowColor: event.color }]}>
-                      <View style={[styles.planetMark, { backgroundColor: event.color }]} />
-                    </View>
-                    <View pointerEvents="none" style={[styles.planetHorizon, { borderColor: event.color }]} />
-                    {plan && active ? <View style={styles.attendingDot} /> : null}
-                    {active ? <View style={styles.dialEventLabel}><Text numberOfLines={2} style={styles.dialEventName}>{event.name}</Text><Text style={styles.dialEventMeta}>{event.date}  ·  {event.place}</Text></View> : null}
-                    </Pressable>
-                  </Animated.View>
-                );
-              })}
+            <View style={styles.orbitMap}>
+              <View pointerEvents="none" style={styles.dialHorizon} />
+              <View style={styles.dialGesture} {...dialPanResponder.panHandlers}>
+                <Animated.View style={[styles.dialTrack, { transform: [{ translateX: trackX }] }]}>
+                  {EVENTS.map((event, index) => (
+                    <DialEvent
+                      key={event.id}
+                      event={event}
+                      index={index}
+                      dragX={dragX}
+                      attending={plans.some((item) => item.eventId === event.id)}
+                      onPress={() => {
+                        const current = clamp(Math.round(positionRef.current / STRIDE), 0, LAST_EVENT);
+                        if (current === index) setSelectedId(event.id);
+                        else settleRef.current(index, true);
+                      }}
+                    />
+                  ))}
+                </Animated.View>
+              </View>
               <Pressable accessibilityRole="button" accessibilityLabel="Hold spaceship for one and a half seconds to hyperdrive" onPressIn={startHold} onPressOut={endHold} style={({ pressed }) => [styles.dialShip, pressed && styles.dialShipPressed]}>
                 <Ship />
-                <Text style={styles.dialShipHint}>HOLD 1.5 SEC TO HYPERDRIVE</Text>
+                <Text style={styles.dialShipHint}>HOLD TO WARP</Text>
               </Pressable>
             </View>
           </>
@@ -283,66 +356,149 @@ export function JourneyScreen() {
 
 function HyperdriveOverlay({ progress }: { progress: Animated.Value }) {
   const [percentage, setPercentage] = useState(0);
-  const scale = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.92, 1.08, 1] });
+  const rush = useRef(new Animated.Value(0)).current;
+  const climb = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const listener = progress.addListener(({ value }) => setPercentage(Math.min(100, Math.round(value * 100))));
+    Animated.timing(rush, { toValue: 1, duration: 3600, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(climb, { toValue: 1, duration: 1100, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     return () => progress.removeListener(listener);
-  }, [progress]);
+  }, [climb, progress, rush]);
+
+  const climbY = climb.interpolate({ inputRange: [0, 1], outputRange: [height * 0.36, 0] });
+  const driftY = rush.interpolate({ inputRange: [0, 1], outputRange: [0, -18] });
+  const shipScale = climb.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
 
   return (
     <View pointerEvents="none" style={styles.hyperdriveOverlay}>
-      {Array.from({ length: 38 }, (_, index) => (
-        <HyperdriveStreak key={index} index={index} />
+      {WARP_STREAKS.map((streak, index) => (
+        <HyperdriveStreak key={index} {...streak} />
       ))}
       <View style={styles.hyperdriveReadout}>
-        <Text style={styles.hyperdriveEyebrow}>ORBIT SCAN</Text>
-        <Animated.Text style={[styles.hyperdrivePercent, { transform: [{ scale }] }]}>{percentage}%</Animated.Text>
-        <Text style={styles.hyperdriveCaption}>LOCATING CONFERENCES</Text>
+        <Text style={styles.hyperdriveEyebrow}>HYPERDRIVE</Text>
+        <Text style={styles.hyperdrivePercent}>{percentage}</Text>
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, { width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} />
         </View>
       </View>
-      <View style={styles.lockedShip}><Ship /></View>
+      <Animated.View style={[styles.lockedShip, { transform: [{ translateY: Animated.add(climbY, driftY) }, { scale: shipScale }] }]}>
+        <Ship />
+      </Animated.View>
     </View>
   );
 }
 
-function HyperdriveStreak({ index }: { index: number }) {
+function HyperdriveStreak({
+  turn,
+  length,
+  duration,
+  delay,
+  thick,
+}: {
+  turn: number;
+  length: number;
+  duration: number;
+  delay: number;
+  thick: boolean;
+}) {
   const travel = useRef(new Animated.Value(0)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const duration = 520 + (index % 6) * 105;
-  const left = `${2 + ((index * 41) % 96)}%` as `${number}%`;
-  const streakHeight = 54 + ((index * 29) % 142);
+  const reach = Math.max(width, height) * 0.78;
 
   useEffect(() => {
     const animation = Animated.loop(Animated.sequence([
-      Animated.delay((index * 43) % 470),
-      Animated.parallel([
-        Animated.timing(travel, { toValue: 1, duration, useNativeDriver: true }),
-        Animated.sequence([
-          Animated.timing(opacity, { toValue: index % 5 === 0 ? 0.9 : 0.6, duration: 120, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0, duration: duration - 120, useNativeDriver: true }),
-        ]),
-      ]),
-      Animated.timing(travel, { toValue: 0, duration: 1, useNativeDriver: true }),
+      Animated.delay(delay),
+      Animated.timing(travel, { toValue: 1, duration, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(travel, { toValue: 0, duration: 0, useNativeDriver: true }),
     ]));
     animation.start();
     return () => animation.stop();
-  }, [duration, index, opacity, travel]);
+  }, [delay, duration, travel]);
 
   return (
-    <Animated.View
-      style={[
-        styles.hyperdriveStreak,
-        {
-          left,
-          height: streakHeight,
-          opacity,
-          transform: [{ translateY: travel.interpolate({ inputRange: [0, 1], outputRange: [-height * 0.18, height * 1.1] }) }],
-        },
-      ]}
-    />
+    <View style={[styles.streakPivot, { transform: [{ rotate: `${turn}deg` }] }]}>
+      <Animated.View
+        style={[
+          styles.hyperdriveStreak,
+          thick && styles.hyperdriveStreakBright,
+          {
+            height: length,
+            opacity: travel.interpolate({ inputRange: [0, 0.06, 0.45, 1], outputRange: [0, thick ? 1 : 0.62, 0.45, 0] }),
+            transform: [
+              { translateY: travel.interpolate({ inputRange: [0, 1], outputRange: [6, reach] }) },
+              { scaleY: travel.interpolate({ inputRange: [0, 1], outputRange: [0.15, 3.4] }) },
+            ],
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+function DialEvent({
+  event,
+  index,
+  dragX,
+  attending,
+  onPress,
+}: {
+  event: EventItem;
+  index: number;
+  dragX: Animated.Value;
+  attending: boolean;
+  onPress: () => void;
+}) {
+  const center = index * STRIDE;
+  const scale = dragX.interpolate({
+    inputRange: [center - STRIDE, center, center + STRIDE],
+    outputRange: [0.74, 1, 0.74],
+    extrapolate: 'clamp',
+  });
+  const opacity = dragX.interpolate({
+    inputRange: [center - STRIDE, center, center + STRIDE],
+    outputRange: [0.4, 1, 0.4],
+    extrapolate: 'clamp',
+  });
+  const labelOpacity = dragX.interpolate({
+    inputRange: [center - STRIDE * 0.5, center, center + STRIDE * 0.5],
+    outputRange: [0, 1, 0],
+    extrapolate: 'clamp',
+  });
+
+  return (
+    <Animated.View style={[styles.dialSlot, { left: center, opacity, transform: [{ scale }] }]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Explore ${event.name}`} onPress={onPress} style={styles.planetHit}>
+        <PlanetBody color={event.color} index={index} />
+      </Pressable>
+      <Animated.View pointerEvents="none" style={[styles.dialEventLabel, { opacity: labelOpacity }]}>
+        <Text numberOfLines={2} style={styles.dialEventName}>{event.name}</Text>
+        <Text style={styles.dialEventMeta}>{event.date}  ·  {event.place}</Text>
+        {attending ? (
+          <View style={styles.goingRow}>
+            <Text style={styles.check}>✓</Text>
+            <Text style={styles.countdown}>{countdownTo(event.date)}</Text>
+          </View>
+        ) : null}
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+function PlanetBody({ color, index }: { color: string; index: number }) {
+  const tilt = -18 + index * 8;
+  const bandTop = 26 + (index % 3) * 14;
+  return (
+    <View style={styles.planetStage}>
+      <View style={[styles.atmosphere, { borderColor: color }]} />
+      <View style={[styles.planetDisc, { backgroundColor: color }]}>
+        <View style={[styles.planetBand, { top: bandTop, transform: [{ rotate: `${tilt}deg` }] }]} />
+        <View style={[styles.planetBand, styles.planetBandThin, { top: bandTop + 34, transform: [{ rotate: `${tilt}deg` }] }]} />
+        <View style={[styles.crater, { left: 24 + (index % 3) * 10, top: 58 + (index % 2) * 8, width: 16, height: 16 }]} />
+        <View style={[styles.crater, { left: 72, top: 40 + index * 3, width: 9, height: 9 }]} />
+        <View style={styles.terminator} />
+        <View style={styles.glint} />
+      </View>
+    </View>
   );
 }
 
@@ -365,28 +521,42 @@ const styles = StyleSheet.create({
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   launchArea: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 34 },
   launchOrb: { width: 230, height: 300, alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
-  orbitOuter: { position: 'absolute', width: 220, height: 220, borderRadius: 120, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(193,174,255,0.2)', transform: [{ rotate: '-18deg' }] },
-  orbitInner: { position: 'absolute', width: 162, height: 162, borderRadius: 90, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(193,174,255,0.12)', transform: [{ rotate: '24deg' }] },
+  orbitOuter: { position: 'absolute', width: 220, height: 220, borderRadius: 120, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.line },
+  orbitInner: { position: 'absolute', width: 162, height: 162, borderRadius: 90, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
   launchShip: { position: 'absolute', bottom: 28 + 42, alignItems: 'center' },
   shipImage: { width: 82, height: 120, opacity: 0.96 },
-  gestureHint: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 14 },
+  gestureHint: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 18 },
   orbitMap: { flex: 1, minHeight: 310, position: 'relative', overflow: 'hidden' },
-  dialOrbitOuter: { position: 'absolute', width: width * 1.18, height: width * 0.74, borderRadius: width, borderWidth: 1, borderColor: 'rgba(187,160,255,0.22)', alignSelf: 'center', top: '27%' },
-  dialOrbitInner: { position: 'absolute', width: width * 0.82, height: width * 0.5, borderRadius: width, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(187,160,255,0.12)', alignSelf: 'center', top: '34%' },
-  dialCenterGlow: { position: 'absolute', width: 12, height: 12, borderRadius: 8, backgroundColor: '#E7DCFF', top: '51%', alignSelf: 'center', shadowColor: '#A476FF', shadowOpacity: 1, shadowRadius: 16 },
+  dialHorizon: { position: 'absolute', left: 0, right: 0, top: '20%', marginTop: PLANET_SIZE / 2, height: StyleSheet.hairlineWidth, backgroundColor: theme.line },
+  dialGesture: { flex: 1 },
+  dialTrack: { ...StyleSheet.absoluteFillObject },
+  dialSlot: { position: 'absolute', top: '20%', width: PLANET_SIZE, marginLeft: -PLANET_SIZE / 2, alignItems: 'center' },
+  planetHit: { width: PLANET_SIZE, height: PLANET_SIZE, alignItems: 'center', justifyContent: 'center' },
+  planetStage: { width: PLANET_SIZE, height: PLANET_SIZE, alignItems: 'center', justifyContent: 'center' },
+  atmosphere: { position: 'absolute', width: PLANET_SIZE + 16, height: PLANET_SIZE + 16, borderRadius: (PLANET_SIZE + 16) / 2, borderWidth: 1, opacity: 0.45 },
+  planetDisc: { width: PLANET_SIZE, height: PLANET_SIZE, borderRadius: PLANET_SIZE / 2, overflow: 'hidden' },
+  planetBand: { position: 'absolute', left: -20, right: -20, height: 12, backgroundColor: 'rgba(0,0,0,0.16)' },
+  planetBandThin: { height: 6, backgroundColor: 'rgba(255,255,255,0.2)' },
+  crater: { position: 'absolute', borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.18)' },
+  terminator: { position: 'absolute', width: PLANET_SIZE, height: PLANET_SIZE, borderRadius: PLANET_SIZE / 2, backgroundColor: 'rgba(0,0,0,0.5)', left: PLANET_SIZE * 0.46 },
+  glint: { position: 'absolute', width: PLANET_SIZE * 0.42, height: PLANET_SIZE * 0.22, borderRadius: PLANET_SIZE, backgroundColor: 'rgba(255,255,255,0.32)', top: PLANET_SIZE * 0.14, left: PLANET_SIZE * 0.12, transform: [{ rotate: '-22deg' }] },
+  dialHint: { position: 'absolute', bottom: 148, alignSelf: 'center', color: '#B9ACD7', fontSize: 10, fontWeight: '600', letterSpacing: 1.6 },
   dialPlanet: { position: 'absolute', top: '38%', zIndex: 2, alignItems: 'center' },
   dialPlanetActive: { left: '50%', marginLeft: -40, top: '35%' },
   dialPlanetLeft: { left: -14, top: '43%', transform: [{ scale: 0.7 }], opacity: 0.58 },
   dialPlanetRight: { right: -14, top: '43%', transform: [{ scale: 0.7 }], opacity: 0.58 },
-  planetActive: { width: 80, height: 80, borderRadius: 40, borderWidth: 1, backgroundColor: 'rgba(22,19,36,0.95)', alignItems: 'center', justifyContent: 'center', shadowOpacity: 0.45, shadowRadius: 18, elevation: 5 },
+  planetActive: { width: 80, height: 80, borderRadius: 40, borderWidth: StyleSheet.hairlineWidth, backgroundColor: 'transparent' },
   planetPeek: { width: 62, height: 62, borderRadius: 31, borderWidth: 1, backgroundColor: 'rgba(22,19,36,0.9)', alignItems: 'center', justifyContent: 'center' },
   planetHorizon: { position: 'absolute', width: '78%', height: '26%', top: '52%', borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 30, opacity: 0.68, transform: [{ rotate: '-8deg' }] },
-  dialEventLabel: { position: 'absolute', top: 96, width: width * 0.62, alignItems: 'center' },
-  dialEventName: { color: theme.fg, fontSize: 17, fontWeight: '400', textAlign: 'center' },
-  dialEventMeta: { color: theme.muted, fontSize: 11, marginTop: 5, textAlign: 'center' },
-  dialShip: { position: 'absolute', bottom: 18, alignSelf: 'center', alignItems: 'center', padding: 10, borderRadius: 30 },
-  dialShipPressed: { backgroundColor: 'rgba(166,136,255,0.18)', transform: [{ scale: 0.96 }] },
-  dialShipHint: { color: '#B9ACD7', fontSize: 8, fontWeight: '600', letterSpacing: 1.3, marginTop: -6 },
+  dialEventLabel: { position: 'absolute', top: PLANET_SIZE + 18, width: TRACK * 0.78, left: (PLANET_SIZE - TRACK * 0.78) / 2, alignItems: 'center' },
+  dialEventName: { color: theme.fg, fontSize: 22, fontWeight: '300', letterSpacing: -0.3, textAlign: 'center' },
+  dialEventMeta: { color: theme.muted, fontSize: 12, marginTop: 6, textAlign: 'center' },
+  goingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8 },
+  check: { color: '#6FCF97', fontSize: 16, fontWeight: '700' },
+  countdown: { color: '#6FCF97', fontSize: 13, fontWeight: '500' },
+  dialShip: { position: 'absolute', bottom: 28, alignSelf: 'center', alignItems: 'center', paddingHorizontal: 16, zIndex: 4 },
+  dialShipPressed: { opacity: 0.72 },
+  dialShipHint: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 8 },
   orbitLine: { position: 'absolute', width: '110%', height: width * 0.72, borderRadius: width, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(190,174,255,0.14)', left: '-5%', top: '26%', transform: [{ rotate: '-18deg' }] },
   orbitLineSmall: { width: '78%', height: width * 0.49, left: '11%', top: '36%', borderColor: 'rgba(190,174,255,0.09)', transform: [{ rotate: '18deg' }] },
   orbitLineWide: { width: '100%', height: width * 0.92, left: '0%', top: '17%', borderColor: 'rgba(255,255,255,0.05)', transform: [{ rotate: '8deg' }] },
@@ -401,14 +571,15 @@ const styles = StyleSheet.create({
   hyperdriveButtonText: { color: '#F0EBFF', fontSize: 11, fontWeight: '700', letterSpacing: 1.35 },
   hyperdriveButtonHint: { color: '#B9ACD7', fontSize: 9, fontWeight: '500', letterSpacing: 1.1, marginTop: 5 },
   hyperdriveButtonArrow: { color: '#C6B5FF', fontSize: 18 },
-  hyperdriveOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 5 },
-  hyperdriveStreak: { position: 'absolute', top: '-18%', width: 1, backgroundColor: '#E7E2FF', shadowColor: '#A98CFF', shadowOpacity: 0.85, shadowRadius: 5, elevation: 3 },
-  hyperdriveReadout: { position: 'absolute', top: '18%', left: 0, right: 0, alignItems: 'center' },
-  hyperdriveEyebrow: { color: '#9487B8', fontSize: 9, fontWeight: '600', letterSpacing: 2.2, marginBottom: 9 },
-  hyperdrivePercent: { color: '#F0EDFF', fontSize: 48, lineHeight: 53, fontWeight: '200', letterSpacing: -1.2, fontVariant: ['tabular-nums'] },
-  hyperdriveCaption: { color: '#BDB4D5', fontSize: 9, fontWeight: '600', letterSpacing: 2, marginTop: 6 },
-  progressTrack: { width: 150, height: 1, backgroundColor: 'rgba(255,255,255,0.25)', marginTop: 13 },
-  progressFill: { height: 1, backgroundColor: '#E4DEFF' },
-  lockedShip: { position: 'absolute', left: width / 2 - 41, top: height * 0.48, alignItems: 'center' },
+  hyperdriveOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 5, backgroundColor: theme.bg },
+  hyperdriveStreak: { width: 1, marginLeft: -0.5, backgroundColor: '#f5f5f5' },
+  hyperdriveStreakBright: { width: 2, marginLeft: -1, backgroundColor: '#ffffff' },
+  streakPivot: { position: 'absolute', left: width / 2, top: VANISH_Y, width: 0, height: 0 },
+  hyperdriveReadout: { position: 'absolute', top: '16%', left: 0, right: 0, alignItems: 'center' },
+  hyperdriveEyebrow: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 2.2, marginBottom: 10 },
+  hyperdrivePercent: { color: theme.fg, fontSize: 72, lineHeight: 76, fontWeight: '200', letterSpacing: -1.6, fontVariant: ['tabular-nums'] },
+  progressTrack: { width: 96, height: StyleSheet.hairlineWidth, backgroundColor: theme.line, marginTop: 16 },
+  progressFill: { height: StyleSheet.hairlineWidth, backgroundColor: theme.fg },
+  lockedShip: { position: 'absolute', left: 0, right: 0, top: height * 0.5, alignItems: 'center' },
   warpPlaceholder: { flex: 1 },
 });

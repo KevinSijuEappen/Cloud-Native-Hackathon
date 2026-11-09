@@ -15,6 +15,7 @@ import { theme } from '../../../theme';
 import type { EventItem } from '../events';
 import {
   SITUATION_LABEL,
+  countdownTo,
   titleLabel,
   type AttendeeProfile,
   type AttendanceRole,
@@ -112,7 +113,8 @@ export function EventSheet({
     <View style={styles.scrim}>
       <Pressable accessibilityLabel="Close event" style={StyleSheet.absoluteFill} onPress={onClose} />
       <KeyboardAvoidingView style={styles.centerStage} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { borderColor: event.color, shadowColor: event.color }]}>
+          <View style={[styles.colorRule, { backgroundColor: event.color }]} />
           <ScrollView
             keyboardShouldPersistTaps="handled"
             bounces={false}
@@ -130,12 +132,12 @@ export function EventSheet({
 
             {step === 'preview' || step === 'details' ? (
               <>
-                <View style={styles.swatch} />
+                <View style={[styles.swatch, { backgroundColor: event.color, borderColor: event.color }]} />
                 <Text style={styles.kicker}>{step === 'details' ? 'EVENT' : plan ? 'YOU’RE ON THE LIST' : 'DESTINATION FOUND'}</Text>
                 <Text style={styles.title}>{event.name}</Text>
                 <Text style={styles.meta}>{event.date}  ·  {event.place}</Text>
                 <Text style={styles.topic}>{event.topic}</Text>
-                {plan ? <StatusLine plan={plan} /> : null}
+                {plan ? <StatusLine plan={plan} date={event.date} /> : null}
               </>
             ) : null}
 
@@ -226,7 +228,8 @@ export function EventSheet({
 
             {step === 'saved' && committed ? (
               <>
-                <View style={styles.swatch} />
+                <View style={[styles.swatch, { backgroundColor: event.color, borderColor: event.color }]} />
+                <GoingMark date={event.date} large />
                 <Text style={styles.kicker}>YOU’RE IN</Text>
                 <Text style={styles.title}>{event.name}</Text>
                 <Text style={styles.body}>
@@ -289,11 +292,26 @@ export function EventSheet({
   );
 }
 
-function StatusLine({ plan }: { plan: EventPlan }) {
+function StatusLine({ plan, date }: { plan: EventPlan; date: string }) {
   const detail = plan.role === 'presenting'
     ? `Presenting${plan.room ? ` · ${plan.room}` : ''}${plan.time ? ` · ${plan.time}` : ''}`
     : 'Attending';
-  return <Text style={styles.status}>{detail}</Text>;
+  return (
+    <View style={styles.goingBlock}>
+      <GoingMark date={date} />
+      <Text style={styles.status}>{detail}</Text>
+    </View>
+  );
+}
+
+function GoingMark({ date, large }: { date: string; large?: boolean }) {
+  const remaining = countdownTo(date);
+  return (
+    <View style={styles.goingRow}>
+      <Text style={[styles.check, large && styles.checkLarge]}>✓</Text>
+      {remaining ? <Text style={[styles.countdown, large && styles.countdownLarge]}>{remaining}</Text> : null}
+    </View>
+  );
 }
 
 function Choice({ title, copy, onPress }: { title: string; copy: string; onPress: () => void }) {
@@ -382,6 +400,7 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,2,9,0.68)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 36 },
   centerStage: { width: '100%', maxWidth: 480, maxHeight: '100%', justifyContent: 'center' },
   sheet: { maxHeight: '100%', overflow: 'hidden', borderRadius: 28, backgroundColor: 'rgba(24,20,36,0.94)', borderWidth: 1, borderColor: 'rgba(190,174,255,0.3)', shadowColor: '#9B78FF', shadowOpacity: 0.28, shadowRadius: 28, elevation: 16 },
+  colorRule: { height: 4 },
   scroll: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 26 },
   handle: { alignSelf: 'flex-end', width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', marginTop: 0, marginBottom: 12 },
   handleMark: { color: theme.muted, fontSize: 19, lineHeight: 27, textAlign: 'center' },
@@ -392,7 +411,13 @@ const styles = StyleSheet.create({
   title: { color: theme.fg, fontSize: 32, lineHeight: 36, fontWeight: '300', letterSpacing: -0.6, marginTop: 8 },
   meta: { color: theme.fg, fontSize: 15, fontWeight: '300', marginTop: 10 },
   topic: { color: theme.muted, fontSize: 14, marginTop: 4 },
-  status: { color: theme.fg, fontSize: 14, fontWeight: '400', marginTop: 14 },
+  status: { color: theme.fg, fontSize: 14, fontWeight: '400', marginTop: 8 },
+  goingBlock: { marginTop: 16 },
+  goingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  check: { color: '#6FCF97', fontSize: 18, fontWeight: '600', lineHeight: 22 },
+  checkLarge: { fontSize: 28, lineHeight: 32 },
+  countdown: { color: '#6FCF97', fontSize: 14, fontWeight: '500', letterSpacing: 0.3 },
+  countdownLarge: { fontSize: 18 },
   body: { color: theme.muted, fontSize: 15, lineHeight: 22, marginTop: 14 },
   section: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 22, marginBottom: 8 },
   highlight: { color: theme.fg, fontSize: 15, lineHeight: 24, fontWeight: '300' },

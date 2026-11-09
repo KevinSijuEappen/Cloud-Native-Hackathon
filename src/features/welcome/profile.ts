@@ -113,3 +113,21 @@ function isSituation(value: unknown): value is WorkSituation {
 function readString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+export function countdownTo(date: string, now = new Date()): string {
+  const match = date.trim().match(/^([A-Za-z]+)\s+(\d{1,2})/);
+  if (!match) return '';
+  const month = MONTHS.indexOf(match[1].slice(0, 3).toLowerCase());
+  const day = Number(match[2]);
+  if (month < 0 || !day) return '';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let year = today.getFullYear();
+  if (new Date(year, month, day).getTime() < today.getTime() - 20 * 86400000) year += 1;
+  const days = Math.round((new Date(year, month, day).getTime() - today.getTime()) / 86400000);
+  if (days > 1) return `${days} days`;
+  if (days === 1) return 'Tomorrow';
+  if (days === 0) return 'Today';
+  return 'Started';
+}

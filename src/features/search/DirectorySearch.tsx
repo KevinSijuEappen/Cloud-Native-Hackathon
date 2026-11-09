@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -50,6 +51,18 @@ export function DirectorySearch({
     };
   }, [trimmed]);
 
+  useEffect(() => {
+    if (!trimmed) return undefined;
+    const timer = setTimeout(() => Keyboard.dismiss(), 1200);
+    return () => clearTimeout(timer);
+  }, [trimmed]);
+
+  const choose = (hit: SearchHit) => {
+    Keyboard.dismiss();
+    if (hit.kind === 'event') onSelectEvent(hit.id);
+    else setContact(hit);
+  };
+
   return (
     <View style={trimmed ? styles.fill : undefined}>
       <TextInput
@@ -59,6 +72,9 @@ export function DirectorySearch({
         placeholderTextColor={theme.faint}
         autoCapitalize="none"
         autoCorrect={false}
+        returnKeyType="search"
+        blurOnSubmit
+        onSubmitEditing={() => Keyboard.dismiss()}
         style={styles.input}
       />
       {trimmed ? (
@@ -69,10 +85,7 @@ export function DirectorySearch({
             <Pressable
               key={`${hit.kind}-${hit.id}`}
               accessibilityRole="button"
-              onPress={() => {
-                if (hit.kind === 'event') onSelectEvent(hit.id);
-                else setContact(hit);
-              }}
+              onPress={() => choose(hit)}
               style={styles.row}
             >
               <Text style={styles.kind}>{hit.kind === 'event' ? 'EVENT' : 'CONTACT'}</Text>
@@ -110,7 +123,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   input: {
     minHeight: 44,
-    marginTop: 16,
+    marginTop: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.lineStrong,
     color: theme.fg,
