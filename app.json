@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Bluetooth Companion",
+    "slug": "bluetooth-companion",
+    "scheme": "bluetoothcompanion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#101827"
+      },
+      "package": "com.anonymous.bluetoothcompanion"
+    },
+    "plugins": []
+  }
+}
