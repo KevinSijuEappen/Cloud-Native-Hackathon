@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -12,13 +11,12 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { theme } from '../../../theme';
-import { createContact, peopleAt, type DirectoryContact } from '../../search/client';
 import { EVENTS, type EventItem } from '../events';
 import { PLANET_SIZE, PlanetBody } from '../Planet';
+import { ConnectionsConferencePopup } from '../../connections/screens/ConnectionsConferencePopup';
 
 const { width, height } = Dimensions.get('window');
 const SHEET_HEIGHT = Math.round(height * 0.56);
@@ -32,14 +30,12 @@ export function LiveApproach({
   presence,
   onClosing,
   onClose,
-  onAttend,
 }: {
   event: EventItem;
   origin: Origin | null;
   presence: string | null;
   onClosing: () => void;
   onClose: () => void;
-  onAttend: () => void;
 }) {
   const zoom = useRef(new Animated.Value(0)).current;
   const sheet = useRef(new Animated.Value(0)).current;
@@ -163,144 +159,16 @@ export function LiveApproach({
             contentContainerStyle={styles.scroll}
           >
             <Text style={styles.kicker}>Happening now</Text>
-            <Text style={styles.title}>{event.name}</Text>
-            <Text style={styles.meta}>{event.date}  ·  {event.place}</Text>
-            <Text style={styles.topic}>{event.topic}</Text>
-            <Text style={styles.body}>{event.blurb}</Text>
             {presence ? (
               <View style={styles.presence}>
                 <Text style={styles.check}>✓</Text>
                 <Text style={styles.presenceText}>{presence}</Text>
               </View>
             ) : null}
-
-            <Text style={styles.section}>Agenda</Text>
-            {event.highlights.map((item) => (
-              <View key={item} style={styles.row}>
-                <AgendaLine item={item} />
-              </View>
-            ))}
-
-            <Text style={styles.section}>Potential contacts</Text>
-            <FloorPeople eventId={event.id} />
-
-            <View style={styles.actions}>
-              <Pressable accessibilityRole="button" onPress={() => leave(onAttend)} style={styles.action}>
-                <Text style={styles.actionText}>{presence ? 'Update how you’re going' : 'Attend'}</Text>
-                <Text style={styles.actionMark}>→</Text>
-              </Pressable>
-            </View>
+            <ConnectionsConferencePopup event={event} />
           </ScrollView>
         </Animated.View>
       </KeyboardAvoidingView>
-    </View>
-  );
-}
-
-function AgendaLine({ item }: { item: string }) {
-  const [when, ...rest] = item.split(' · ');
-  const what = rest.join(' · ');
-  if (!what) return <Text style={styles.rowText}>{item}</Text>;
-  return (
-    <View style={styles.agendaLine}>
-      <Text style={styles.agendaWhen}>{when}</Text>
-      <Text style={styles.agendaWhat}>{what}</Text>
-    </View>
-  );
-}
-
-function FloorPeople({ eventId }: { eventId: string }) {
-  const [people, setPeople] = useState<DirectoryContact[]>(() => peopleAt(eventId));
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState('');
-  const [role, setRole] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    if (!name.trim() || !role.trim()) {
-      setError('Add a name and what they do.');
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      await createContact({ name, jobTitle: role, eventId });
-      setPeople(peopleAt(eventId));
-      setName('');
-      setRole('');
-      setAdding(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <View>
-      {people.length === 0 ? <Text style={styles.empty}>No one is listed on the floor yet.</Text> : null}
-      {people.map((person) => {
-        const open = openId === person.id;
-        return (
-          <Pressable
-            key={person.id}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: open }}
-            onPress={() => setOpenId(open ? null : person.id)}
-            style={styles.row}
-          >
-            <Text style={styles.personName}>{person.name}</Text>
-            <Text style={styles.personMeta}>{[person.jobTitle, person.here].filter(Boolean).join(' · ')}</Text>
-            {open && person.interests ? <Text style={styles.personInterests}>{person.interests}</Text> : null}
-          </Pressable>
-        );
-      })}
-      {adding ? (
-        <>
-          <Field label="Name" value={name} placeholder="Their name" onChangeText={setName} />
-          <Field label="What they do" value={role} placeholder="iOS engineer" onChangeText={setRole} />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Pressable accessibilityRole="button" disabled={saving} onPress={save} style={styles.action}>
-            {saving ? <ActivityIndicator color={theme.fg} /> : (
-              <>
-                <Text style={styles.actionText}>Save contact</Text>
-                <Text style={styles.actionMark}>→</Text>
-              </>
-            )}
-          </Pressable>
-        </>
-      ) : (
-        <Pressable accessibilityRole="button" onPress={() => { setError(''); setAdding(true); }} style={styles.action}>
-          <Text style={styles.actionText}>Add a contact</Text>
-          <Text style={styles.actionMark}>→</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-function Field({
-  label,
-  value,
-  placeholder,
-  onChangeText,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChangeText: (value: string) => void;
-}) {
-  return (
-    <View>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        placeholder={placeholder}
-        placeholderTextColor={theme.faint}
-        onChangeText={onChangeText}
-        autoCapitalize="sentences"
-        style={styles.input}
-      />
     </View>
   );
 }

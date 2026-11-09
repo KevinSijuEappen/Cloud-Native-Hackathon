@@ -7,6 +7,7 @@ export type EventItem = {
   blurb: string;
   highlights: string[];
   color: string;
+  officialUrl?: string;
   x: number;
   y: number;
 };

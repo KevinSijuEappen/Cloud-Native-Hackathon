@@ -7,19 +7,21 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit",
-    "search": "npm start --prefix server"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@clerk/expo": "^4.15.1",
     "@clerk/expo-native-components": "^0.4.4",
+    "@supabase/supabase-js": "^2",
     "expo": "~54.0.0",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.0",
     "expo-system-ui": "~6.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "react-native": "0.81.4"
+    "react-native": "0.81.4",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-worklets": "~0.8.3"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

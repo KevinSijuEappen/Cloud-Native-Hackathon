@@ -421,7 +421,12 @@ export function JourneyScreen() {
               <EnterFloor
                 visible={showEnter}
                 label={EVENTS[focusedIndex].name}
-                onPress={() => openFloor(EVENTS[focusedIndex].id)}
+                actionLabel={plans.some((plan) => plan.eventId === EVENTS[focusedIndex].id) ? 'Enter the floor' : 'Join to enter'}
+                onPress={() => {
+                  const event = EVENTS[focusedIndex];
+                  if (plans.some((plan) => plan.eventId === event.id)) openFloor(event.id);
+                  else setSelectedId(event.id);
+                }}
               />
             </View>
           </>
@@ -438,11 +443,6 @@ export function JourneyScreen() {
           presence={floorPresence}
           onClosing={() => setFloorClosing(true)}
           onClose={() => {
-            setFloorId(null);
-            setFloorClosing(false);
-          }}
-          onAttend={() => {
-            setSelectedId(floorEvent.id);
             setFloorId(null);
             setFloorClosing(false);
           }}
@@ -679,7 +679,7 @@ function GoingBadge({ date }: { date: string }) {
   );
 }
 
-function EnterFloor({ visible, label, onPress }: { visible: boolean; label: string; onPress: () => void }) {
+function EnterFloor({ visible, label, actionLabel, onPress }: { visible: boolean; label: string; actionLabel: string; onPress: () => void }) {
   const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
   useEffect(() => {
     Animated.timing(opacity, {
@@ -702,7 +702,7 @@ function EnterFloor({ visible, label, onPress }: { visible: boolean; label: stri
       >
         <View style={styles.enterLead}>
           <LiveDot />
-          <Text style={styles.enterFloorText}>Enter the floor</Text>
+          <Text style={styles.enterFloorText}>{actionLabel}</Text>
         </View>
         <Text style={styles.enterFloorMark}>→</Text>
       </Pressable>
