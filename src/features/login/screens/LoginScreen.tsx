@@ -1,6 +1,6 @@
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-export function LoginScreen() {
+export function LoginScreen({ onContinue }: { onContinue: () => void }) {
   return (
     <View style={styles.screen}>
       <View style={styles.content}>
@@ -27,7 +27,7 @@ export function LoginScreen() {
           style={styles.input}
         />
 
-        <TouchableOpacity accessibilityRole="button" onPress={() => {}} style={styles.button}>
+        <TouchableOpacity accessibilityRole="button" onPress={onContinue} style={styles.button}>
           <Text style={styles.buttonText}>Sign in</Text>
         </TouchableOpacity>
 
