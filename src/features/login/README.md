@@ -1,8 +1,7 @@
 # Login feature
 
-Example launch screen and a place to add authentication later.
+Clerk sign-in and sign-up, rendered in-app with the native `AuthView`.
 
-- `screens/LoginScreen.tsx`: login UI and placeholder actions
-- Add `components/` for reusable form elements, `services/` for auth providers, and `types/` for auth contracts as the feature grows.
-
-No credentials are submitted and no authentication provider is connected yet.
+- `screens/LoginScreen.tsx`: embedded Clerk authentication. It does not open a browser.
+- The app stays on this screen until the Clerk session is active, then shows the journey screen.
+- Set `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` in `.env`. Enable the Native API for this app in the Clerk dashboard.

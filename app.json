@@ -1,21 +1,32 @@
 {
   "expo": {
-    "name": "Bluetooth Companion",
-    "slug": "bluetooth-companion",
-    "scheme": "bluetoothcompanion",
+    "name": "Convergence",
+    "slug": "convergence",
+    "scheme": "convergence",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/convergence-icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/convergence-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#080D1A"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.bluetoothcompanion"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#101827"
+        "foregroundImage": "./assets/convergence-icon.png",
+        "backgroundColor": "#080D1A"
       },
       "package": "com.anonymous.bluetoothcompanion"
     },
-    "plugins": []
+    "plugins": [
+      "expo-system-ui",
+      "expo-secure-store",
+      ["@clerk/expo", { "appleSignIn": false, "theme": "./clerk-theme.json" }]
+    ]
   }
 }

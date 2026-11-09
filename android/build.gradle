@@ -12,9 +12,6 @@ buildscript {
   }
 }
 
-// Match the NDK revision installed in the Android SDK used for this project.
-ext.ndkVersion = "27.0.12077973"
-
 allprojects {
   repositories {
     google()

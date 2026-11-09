@@ -1,6 +1,6 @@
-# Bluetooth Companion
+# Convergence
 
-Cross-platform iOS and Android mobile starter built with Expo, React Native, and TypeScript. This gives the project one shared application codebase while retaining access to native Bluetooth APIs through native modules when device work begins.
+Cross-platform iOS and Android app built with Expo, React Native, and TypeScript. Sign-in uses Clerk's native in-app screens. The shared codebase can still reach native Bluetooth APIs through native modules when device work begins.
 
 ## Getting started
 

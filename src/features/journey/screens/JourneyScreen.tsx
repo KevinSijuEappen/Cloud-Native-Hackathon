@@ -1,3 +1,4 @@
+import { UserButton } from '@clerk/expo/native-components';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -10,6 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Logo } from '../../../components/Logo';
 
 type EventItem = {
   id: string;
@@ -84,12 +86,15 @@ export function JourneyScreen() {
       <View style={[styles.content, { paddingTop: ANDROID_TOP_INSET + 8 }]}>
         <View style={styles.topBar}>
           <View style={styles.brandGroup}>
-            <View style={styles.brandMark}><Text style={styles.brandSpark}>✦</Text></View>
-            <Text style={styles.brand}>STARPATH</Text>
+            <Logo size={28} />
+            <Text style={styles.brand}>CONVERGENCE</Text>
           </View>
-          <View style={styles.statusPill}>
-            <View style={styles.statusDot} />
-            <Text style={styles.counter}>{launched ? '4 DESTINATIONS' : 'READY TO EXPLORE'}</Text>
+          <View style={styles.topActions}>
+            <View style={styles.statusPill}>
+              <View style={styles.statusDot} />
+              <Text style={styles.counter}>{launched ? '4 DESTINATIONS' : 'READY TO EXPLORE'}</Text>
+            </View>
+            <UserButton />
           </View>
         </View>
 
@@ -105,7 +110,7 @@ export function JourneyScreen() {
               <View style={styles.launchOrb}>
                 <View style={styles.orbitOuter} />
                 <View style={styles.orbitInner} />
-                <View style={styles.orbitCore}><Text style={styles.shipGlyph}>▲</Text></View>
+                <View style={styles.orbitCore}><Logo size={64} /></View>
                 <View style={styles.orbitArrow}><Text style={styles.arrow}>↑</Text></View>
                 <View style={[styles.spark, styles.sparkOne]} />
                 <View style={[styles.spark, styles.sparkTwo]} />
@@ -163,7 +168,7 @@ export function JourneyScreen() {
                 </Pressable>
               ))}
               <Animated.View style={[styles.shipFloat, { transform: [{ translateY: shipY }] }]}>
-                <Text style={styles.shipGlyph}>▲</Text>
+                <Logo size={28} />
               </Animated.View>
             </View>
             <View style={styles.bottomHint}>
@@ -214,10 +219,9 @@ const styles = StyleSheet.create({
   starLayer: { ...StyleSheet.absoluteFillObject },
   star: { position: 'absolute', width: 2, height: 2, borderRadius: 2, backgroundColor: '#d7e7ff' },
   topBar: { height: 48, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  brandGroup: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  brandMark: { width: 27, height: 27, borderRadius: 9, backgroundColor: '#15233b', alignItems: 'center', justifyContent: 'center' },
-  brandSpark: { color: '#a8c4f5', fontSize: 15 },
-  brand: { color: '#e6edfb', fontSize: 12, fontWeight: '800', letterSpacing: 2.2 },
+  brandGroup: { flexDirection: 'row', alignItems: 'center', gap: 9, flexShrink: 1 },
+  brand: { color: '#e6edfb', fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statusPill: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 20, backgroundColor: 'rgba(28, 42, 65, 0.78)', borderWidth: 1, borderColor: '#273753' },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#73ddb5' },
   counter: { color: '#a1b3d2', fontSize: 8, fontWeight: '700', letterSpacing: 1 },
@@ -230,7 +234,6 @@ const styles = StyleSheet.create({
   orbitOuter: { position: 'absolute', width: 202, height: 202, borderRadius: 110, borderWidth: 1, borderColor: 'rgba(121, 155, 210, 0.35)', backgroundColor: 'rgba(33, 53, 84, 0.12)' },
   orbitInner: { position: 'absolute', width: 145, height: 145, borderRadius: 80, borderWidth: 1, borderColor: 'rgba(121, 155, 210, 0.22)' },
   orbitCore: { width: 76, height: 76, borderRadius: 40, backgroundColor: '#17243a', borderWidth: 1, borderColor: '#647ea7', alignItems: 'center', justifyContent: 'center', shadowColor: '#73a7ff', shadowOpacity: 0.2, shadowRadius: 22, elevation: 6 },
-  shipGlyph: { color: '#edf4ff', fontSize: 25 },
   orbitArrow: { position: 'absolute', top: 25, left: 88, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#15233a' },
   arrow: { color: '#9bb5e2', fontSize: 16, fontWeight: '700' },
   spark: { position: 'absolute', width: 5, height: 5, borderRadius: 3, backgroundColor: '#a4c1f0' },

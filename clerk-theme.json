@@ -1,0 +1,39 @@
+{
+  "colors": {
+    "primary": "#A855F7",
+    "background": "#080D1A",
+    "input": "#152033",
+    "danger": "#F87171",
+    "success": "#73DDB5",
+    "warning": "#F59E0B",
+    "foreground": "#F4F7FB",
+    "mutedForeground": "#9BAAC3",
+    "primaryForeground": "#FFFFFF",
+    "inputForeground": "#F4F7FB",
+    "neutral": "#64748B",
+    "border": "#2A3A55",
+    "ring": "#C084FC",
+    "muted": "#152033",
+    "shadow": "#00000066"
+  },
+  "darkColors": {
+    "primary": "#A855F7",
+    "background": "#080D1A",
+    "input": "#152033",
+    "danger": "#F87171",
+    "success": "#73DDB5",
+    "warning": "#F59E0B",
+    "foreground": "#F4F7FB",
+    "mutedForeground": "#9BAAC3",
+    "primaryForeground": "#FFFFFF",
+    "inputForeground": "#F4F7FB",
+    "neutral": "#64748B",
+    "border": "#2A3A55",
+    "ring": "#C084FC",
+    "muted": "#152033",
+    "shadow": "#00000066"
+  },
+  "design": {
+    "borderRadius": 16
+  }
+}
