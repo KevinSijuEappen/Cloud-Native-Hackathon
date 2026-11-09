@@ -12,10 +12,11 @@ import {
   View,
 } from 'react-native';
 import { theme } from '../../../theme';
-import type { EventItem } from '../events';
+import { isHappening, type EventItem } from '../events';
+import { FlipCounter } from '../FlipCounter';
+import { createContact, peopleAt, type DirectoryContact } from '../../search/client';
 import {
   SITUATION_LABEL,
-  countdownTo,
   titleLabel,
   type AttendeeProfile,
   type AttendanceRole,
@@ -35,6 +36,7 @@ export function EventSheet({
   profileWasSaved,
   onClose,
   onSave,
+  onLeave,
 }: {
   event: EventItem;
   plan?: EventPlan;
@@ -47,6 +49,7 @@ export function EventSheet({
     room?: string;
     time?: string;
   }) => Promise<void>;
+  onLeave?: () => Promise<void>;
 }) {
   const [step, setStep] = useState<Step>('preview');
   const [situation, setSituation] = useState<WorkSituation>(suggested?.situation ?? 'working');
@@ -109,12 +112,26 @@ export function EventSheet({
     interests: interests.trim(),
   });
 
+  const leave = async () => {
+    if (!onLeave) return;
+    setSaving(true);
+    setError('');
+    try {
+      await onLeave();
+      onClose();
+    } catch {
+      setError('Could not update. Check your connection and try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <View style={styles.scrim}>
       <Pressable accessibilityLabel="Close event" style={StyleSheet.absoluteFill} onPress={onClose} />
       <KeyboardAvoidingView style={styles.centerStage} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.sheet, { borderColor: event.color, shadowColor: event.color }]}>
-          <View style={[styles.colorRule, { backgroundColor: event.color }]} />
+        <View style={[styles.sheetFrame, { borderColor: event.color }]}>
+          <View style={styles.sheet}>
           <ScrollView
             keyboardShouldPersistTaps="handled"
             bounces={false}
@@ -137,9 +154,12 @@ export function EventSheet({
                 <Text style={styles.title}>{event.name}</Text>
                 <Text style={styles.meta}>{event.date}  ·  {event.place}</Text>
                 <Text style={styles.topic}>{event.topic}</Text>
+                {isHappening(event.date) ? <Text style={styles.liveTag}>Happening now</Text> : null}
                 {plan ? <StatusLine plan={plan} date={event.date} /> : null}
               </>
             ) : null}
+
+            {isHappening(event.date) && (step === 'preview' || step === 'details') ? <LiveFloor eventId={event.id} /> : null}
 
             {step === 'details' ? (
               <>
@@ -229,7 +249,7 @@ export function EventSheet({
             {step === 'saved' && committed ? (
               <>
                 <View style={[styles.swatch, { backgroundColor: event.color, borderColor: event.color }]} />
-                <GoingMark date={event.date} large />
+                <GoingMark date={event.date} />
                 <Text style={styles.kicker}>YOU’RE IN</Text>
                 <Text style={styles.title}>{event.name}</Text>
                 <Text style={styles.body}>
@@ -246,11 +266,13 @@ export function EventSheet({
               <View style={styles.actions}>
                 <Primary label={plan ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
                 <Secondary label="View event" onPress={() => setStep('details')} />
+                {plan ? <Secondary label="I'm no longer going" onPress={leave} /> : null}
               </View>
             ) : null}
             {step === 'details' ? (
               <View style={styles.actions}>
                 <Primary label={plan ? 'Update how you’re going' : 'Attend'} onPress={() => { setError(''); setStep('role'); }} />
+                {plan ? <Secondary label="I'm no longer going" onPress={leave} /> : null}
               </View>
             ) : null}
             {step === 'confirm' ? (
@@ -286,8 +308,58 @@ export function EventSheet({
               </Pressable>
             ) : null}
           </ScrollView>
+          </View>
         </View>
       </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function LiveFloor({ eventId }: { eventId: string }) {
+  const [people, setPeople] = useState<DirectoryContact[]>(() => peopleAt(eventId));
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('');
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    if (!name.trim() || !role.trim()) {
+      setError('Add a name and what they do.');
+      return;
+    }
+    setError('');
+    await createContact({ name, jobTitle: role, eventId });
+    setPeople(peopleAt(eventId));
+    setName('');
+    setRole('');
+    setAdding(false);
+  };
+
+  return (
+    <View style={styles.floor}>
+      <Text style={styles.section}>HERE NOW</Text>
+      {people.map((person) => (
+        <View key={person.id} style={styles.person}>
+          <Text style={styles.personName}>{person.name}</Text>
+          <Text style={styles.personMeta}>{[person.jobTitle, person.here].filter(Boolean).join(' · ')}</Text>
+        </View>
+      ))}
+      {adding ? (
+        <>
+          <Field label="Name" value={name} placeholder="Their name" onChangeText={setName} />
+          <Field label="What they do" value={role} placeholder="iOS engineer" onChangeText={setRole} />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Pressable accessibilityRole="button" onPress={save} style={styles.action}>
+            <Text style={styles.primaryText}>Save contact</Text>
+            <Text style={styles.actionMark}>→</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable accessibilityRole="button" onPress={() => setAdding(true)} style={styles.action}>
+          <Text style={styles.primaryText}>Add a contact</Text>
+          <Text style={styles.actionMark}>→</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -304,12 +376,11 @@ function StatusLine({ plan, date }: { plan: EventPlan; date: string }) {
   );
 }
 
-function GoingMark({ date, large }: { date: string; large?: boolean }) {
-  const remaining = countdownTo(date);
+function GoingMark({ date }: { date: string }) {
   return (
     <View style={styles.goingRow}>
-      <Text style={[styles.check, large && styles.checkLarge]}>✓</Text>
-      {remaining ? <Text style={[styles.countdown, large && styles.countdownLarge]}>{remaining}</Text> : null}
+      <Text style={styles.check}>✓</Text>
+      {isHappening(date) ? <Text style={styles.liveInline}>Live</Text> : <FlipCounter date={date} />}
     </View>
   );
 }
@@ -399,9 +470,9 @@ function titlePlaceholder(situation: WorkSituation): string {
 const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,2,9,0.68)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 36 },
   centerStage: { width: '100%', maxWidth: 480, maxHeight: '100%', justifyContent: 'center' },
-  sheet: { maxHeight: '100%', overflow: 'hidden', borderRadius: 28, backgroundColor: 'rgba(24,20,36,0.94)', borderWidth: 1, borderColor: 'rgba(190,174,255,0.3)', shadowColor: '#9B78FF', shadowOpacity: 0.28, shadowRadius: 28, elevation: 16 },
-  colorRule: { height: 4 },
-  scroll: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 26 },
+  sheetFrame: { maxHeight: '100%', borderRadius: 28, borderWidth: 2 },
+  sheet: { borderRadius: 26, overflow: 'hidden', backgroundColor: 'rgba(24,20,36,0.94)' },
+  scroll: { padding: 24 },
   handle: { alignSelf: 'flex-end', width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', marginTop: 0, marginBottom: 12 },
   handleMark: { color: theme.muted, fontSize: 19, lineHeight: 27, textAlign: 'center' },
   backRow: { alignSelf: 'flex-start', marginBottom: 8, marginTop: 6 },
@@ -411,13 +482,16 @@ const styles = StyleSheet.create({
   title: { color: theme.fg, fontSize: 32, lineHeight: 36, fontWeight: '300', letterSpacing: -0.6, marginTop: 8 },
   meta: { color: theme.fg, fontSize: 15, fontWeight: '300', marginTop: 10 },
   topic: { color: theme.muted, fontSize: 14, marginTop: 4 },
-  status: { color: theme.fg, fontSize: 14, fontWeight: '400', marginTop: 8 },
+  liveTag: { color: '#8fd18a', fontSize: 12, fontWeight: '500', letterSpacing: 1.2, marginTop: 12 },
+  liveInline: { color: '#8fd18a', fontSize: 13, fontWeight: '500', letterSpacing: 1.1, textTransform: 'uppercase' },
+  floor: { marginTop: 8 },
+  person: { paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.line },
+  personName: { color: theme.fg, fontSize: 16, fontWeight: '300' },
+  personMeta: { color: theme.muted, fontSize: 13, marginTop: 3 },
   goingBlock: { marginTop: 16 },
   goingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   check: { color: '#6FCF97', fontSize: 18, fontWeight: '600', lineHeight: 22 },
-  checkLarge: { fontSize: 28, lineHeight: 32 },
-  countdown: { color: '#6FCF97', fontSize: 14, fontWeight: '500', letterSpacing: 0.3 },
-  countdownLarge: { fontSize: 18 },
+  status: { color: theme.fg, fontSize: 14, fontWeight: '400', marginTop: 8 },
   body: { color: theme.muted, fontSize: 15, lineHeight: 22, marginTop: 14 },
   section: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 22, marginBottom: 8 },
   highlight: { color: theme.fg, fontSize: 15, lineHeight: 24, fontWeight: '300' },

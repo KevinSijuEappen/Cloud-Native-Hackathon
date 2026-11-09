@@ -11,6 +11,8 @@ export type DirectoryContact = {
   interests: string;
   situation: string;
   source: string;
+  eventId?: string;
+  here?: string;
 };
 
 export type SearchHit = ({ kind: 'event' } & EventItem) | ({ kind: 'contact' } & DirectoryContact);
@@ -22,6 +24,49 @@ const CONTACTS: DirectoryContact[] = [
   { id: 'c4', name: 'Luis Ortega', jobTitle: 'Founding engineer', company: '', interests: 'Indie products, community, founders', situation: 'looking', source: 'seed' },
 ];
 
+const FLOOR: DirectoryContact[] = [
+  { id: 'f1', name: 'Sasha Nguyen', jobTitle: 'iOS engineer', company: 'Lumen', interests: 'Mobile, React Native', situation: 'working', source: 'floor', eventId: '5', here: 'By the stage' },
+  { id: 'f2', name: 'Jonah Ellis', jobTitle: 'Founder', company: 'Northline', interests: 'Devtools, hiring', situation: 'working', source: 'floor', eventId: '5', here: 'Coffee bar' },
+  { id: 'f3', name: 'Amina Farouk', jobTitle: 'Design engineer', company: 'Keel', interests: 'Interfaces, motion', situation: 'working', source: 'floor', eventId: '5', here: 'Workshop room' },
+  { id: 'f4', name: 'Elena Voss', jobTitle: 'Community lead', company: 'Convergence', interests: 'People, events, introductions', situation: 'working', source: 'floor', eventId: '5', here: 'Registration' },
+];
+
+const created: DirectoryContact[] = [];
+
+export function peopleAt(eventId: string): DirectoryContact[] {
+  return [...created.filter((contact) => contact.eventId === eventId), ...FLOOR.filter((contact) => contact.eventId === eventId)];
+}
+
+export async function createContact(input: { name: string; jobTitle: string; eventId: string }): Promise<DirectoryContact> {
+  const contact: DirectoryContact = {
+    id: `floor-${Date.now()}`,
+    name: input.name.trim(),
+    jobTitle: input.jobTitle.trim(),
+    company: '',
+    interests: input.jobTitle.trim(),
+    situation: 'working',
+    source: 'floor',
+    eventId: input.eventId,
+    here: 'Here now',
+  };
+  created.unshift(contact);
+  if (CLOUD_URL && API_KEY) {
+    try {
+      await fetch(`${CLOUD_URL}/contacts/_doc/${encodeURIComponent(contact.id)}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `ApiKey ${API_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(contact),
+      });
+    } catch {
+      // The contact stays on this phone if the cloud does not answer.
+    }
+  }
+  return contact;
+}
+
 const searchFields = ['name^3', 'topic^2', 'place', 'blurb', 'highlights', 'jobTitle^2', 'company', 'interests^2'];
 
 export function localHits(query: string): SearchHit[] {
@@ -29,7 +74,7 @@ export function localHits(query: string): SearchHit[] {
   if (!needle) return [];
   const events = EVENTS.filter((event) => includesAny(needle, [event.name, event.place, event.topic, event.blurb, event.highlights.join(' ')]))
     .map((event) => ({ kind: 'event' as const, ...event }));
-  const contacts = CONTACTS.filter((contact) => includesAny(needle, [contact.name, contact.jobTitle, contact.company, contact.interests, contact.situation]))
+  const contacts = [...created, ...FLOOR, ...CONTACTS].filter((contact) => includesAny(needle, [contact.name, contact.jobTitle, contact.company, contact.interests, contact.situation, contact.here ?? '']))
     .map((contact) => ({ kind: 'contact' as const, ...contact }));
   return [...events, ...contacts];
 }

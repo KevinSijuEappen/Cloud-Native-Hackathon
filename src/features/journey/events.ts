@@ -60,4 +60,52 @@ export const EVENTS: EventItem[] = [
     x: 73,
     y: 68,
   },
+  {
+    id: '5',
+    name: 'Live Floor',
+    place: 'Salt Lake City',
+    date: 'Nov 9–10',
+    topic: 'People · Now',
+    blurb: 'The floor is open right now. See who is here and keep the people you want to meet again.',
+    highlights: ['8:30 AM · Doors open', '10:00 AM · Hallway track', 'All day · Open floor', '4:00 PM · Meet people in the room'],
+    color: '#8fd18a',
+    x: 48,
+    y: 46,
+  },
 ];
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+export type CountdownParts = { days: number; hours: number; minutes: number };
+
+export function countdownParts(date: string, now = new Date()): CountdownParts {
+  const span = eventWindow(date, now);
+  if (!span) return { days: 0, hours: 0, minutes: 0 };
+  const target = now < span.start ? span.start : span.end;
+  const minutesLeft = Math.max(0, Math.floor((target.getTime() - now.getTime()) / 60000));
+  return {
+    days: Math.floor(minutesLeft / 1440),
+    hours: Math.floor((minutesLeft % 1440) / 60),
+    minutes: minutesLeft % 60,
+  };
+}
+
+export function isHappening(date: string, now = new Date()): boolean {
+  const span = eventWindow(date, now);
+  return !!span && now >= span.start && now < span.end;
+}
+
+function eventWindow(date: string, now: Date): { start: Date; end: Date } | null {
+  const match = date.trim().match(/^([A-Za-z]+)\s+(\d{1,2})(?:\s*[–-]\s*(\d{1,2}))?/);
+  if (!match) return null;
+  const month = MONTHS.indexOf(match[1].slice(0, 3).toLowerCase());
+  const startDay = Number(match[2]);
+  const endDay = match[3] ? Number(match[3]) : startDay;
+  if (month < 0 || !startDay || !endDay) return null;
+  let year = now.getFullYear();
+  if (new Date(year, month, endDay + 1).getTime() < now.getTime() - 20 * 86400000) year += 1;
+  return {
+    start: new Date(year, month, startDay),
+    end: new Date(year, month, endDay + 1),
+  };
+}

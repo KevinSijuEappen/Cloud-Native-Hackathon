@@ -1,9 +1,8 @@
 import { useUser } from '@clerk/expo';
 import { UserButton } from '@clerk/expo/native-components';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ContactProfilePage } from '../../welcome/screens/ContactProfilePage';
 import {
-  countdownTo,
   readEventPlans,
   readStoredAttendee,
   suggestAttendee,
@@ -26,15 +25,16 @@ import { Hairlines } from '../../../components/Hairlines';
 import { Logo } from '../../../components/Logo';
 import { DirectorySearch } from '../../search/DirectorySearch';
 import { theme } from '../../../theme';
-import { EVENTS, type EventItem } from '../events';
+import { EVENTS, isHappening, type EventItem } from '../events';
+import { FlipCounter } from '../FlipCounter';
+import { PLANET_SIZE, PlanetBody } from '../Planet';
 import { EventSheet } from './EventSheet';
+import { LiveApproach } from './LiveApproach';
 
 const { width, height } = Dimensions.get('window');
 const TRACK = width - 48;
-const PLANET_SIZE = 128;
 const STRIDE = Math.round(PLANET_SIZE * 1.28);
 const LAST_EVENT = EVENTS.length - 1;
-const VANISH_Y = height * 0.33;
 const WARP_STREAKS = Array.from({ length: 44 }, (_, index) => ({
   turn: (index * 137.5) % 360,
   length: 28 + (index % 7) * 16,
@@ -83,9 +83,26 @@ export function JourneyScreen() {
   const [orbitPage, setOrbitPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [dialing, setDialing] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [floorId, setFloorId] = useState<string | null>(null);
+  const [floorOrigin, setFloorOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [floorClosing, setFloorClosing] = useState(false);
   const plans = readEventPlans(user?.unsafeMetadata);
   const selected = EVENTS.find((event) => event.id === selectedId) ?? null;
+  const floorEvent = EVENTS.find((event) => event.id === floorId) ?? null;
+  const floorPlan = floorEvent ? plans.find((plan) => plan.eventId === floorEvent.id) : undefined;
+  const floorPresence = floorPlan
+    ? floorPlan.role === 'presenting'
+      ? `Presenting${floorPlan.room ? ` · ${floorPlan.room}` : ''}${floorPlan.time ? ` · ${floorPlan.time}` : ''}`
+      : 'You’re attending'
+    : null;
+  const showEnter = phase === 'orbit' && !dialing && !settling && !floorId && isHappening(EVENTS[focusedIndex].date);
   const starsOpacity = useRef(new Animated.Value(0.55)).current;
+  const chromeOpacity = useRef(new Animated.Value(1)).current;
+  const anchors = useRef(new Map<string, View>());
+  const openingFloor = useRef(false);
   const progress = useRef(new Animated.Value(0)).current;
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vibrationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -101,6 +118,7 @@ export function JourneyScreen() {
   const dialPanResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
     onPanResponderGrant: () => {
+      setDialing(true);
       dragX.stopAnimation((value) => {
         originRef.current = value;
         positionRef.current = value;
@@ -116,11 +134,13 @@ export function JourneyScreen() {
       }
     },
     onPanResponderRelease: (_, gesture) => {
+      setDialing(false);
       const projected = originRef.current - gesture.dx - gesture.vx * 360;
       const target = clamp(Math.round(rubber(projected) / STRIDE), 0, LAST_EVENT);
       settleRef.current(target, target !== hapticIndex.current);
     },
     onPanResponderTerminate: () => {
+      setDialing(false);
       const target = clamp(Math.round(positionRef.current / STRIDE), 0, LAST_EVENT);
       settleRef.current(target, false);
     },
@@ -133,11 +153,8 @@ export function JourneyScreen() {
     onPanResponderGrant: () => shipDragY.stopAnimation((value) => { shipStartY.current = value; }),
     onPanResponderMove: (_, gesture) => shipDragY.setValue(Math.max(-height * 0.42, Math.min(0, shipStartY.current + gesture.dy))),
     onPanResponderRelease: (_, gesture) => {
-      if (gesture.dy < -height * 0.12) {
-        Animated.timing(shipDragY, { toValue: -height * 0.32, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => launch());
-      } else {
-        Animated.spring(shipDragY, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 5 }).start();
-      }
+      if (gesture.dy < -height * 0.12) launchRef.current();
+      else Animated.spring(shipDragY, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 5 }).start();
     },
     onPanResponderTerminate: () => Animated.spring(shipDragY, { toValue: 0, useNativeDriver: true }).start(),
   }), [phase, shipDragY]);
@@ -149,12 +166,31 @@ export function JourneyScreen() {
     placement: { type: 'sectionStart' as const, section: 'profile' as const },
     content: <ContactProfilePage />,
   }], []);
+  const screenRef = useRef<View>(null);
+  const shipRef = useRef<View>(null);
+  const launchRef = useRef<() => void>(() => {});
+  const [warpFrom, setWarpFrom] = useState(height * 0.62);
   const launch = () => {
-    if (phase === 'ready' || phase === 'orbit') {
-      if (phase === 'orbit') setOrbitPage((page) => page + 1);
+    if (phase !== 'ready' && phase !== 'orbit') return;
+    const fromPhase = phase;
+    const go = (top: number) => {
+      setWarpFrom(top);
+      if (fromPhase === 'orbit') setOrbitPage((page) => page + 1);
       setPhase('hyperdrive');
+    };
+    const ship = shipRef.current;
+    const screen = screenRef.current;
+    if (!ship || !screen) {
+      go(fromPhase === 'orbit' ? height * 0.72 : height * 0.58);
+      return;
     }
+    screen.measureInWindow((_sx, screenTop) => {
+      ship.measureInWindow((_x, shipTop) => {
+        go(shipTop - screenTop);
+      });
+    });
   };
+  launchRef.current = launch;
   const startHold = () => {
     if (phase !== 'orbit') return;
     Vibration.vibrate(120);
@@ -180,19 +216,58 @@ export function JourneyScreen() {
     const next = clamp(index, 0, LAST_EVENT);
     if (withHaptic) pulse();
     hapticIndex.current = next;
+    setSettling(true);
     Animated.spring(dragX, {
       toValue: next * STRIDE,
       useNativeDriver: true,
       speed: 12,
       bounciness: 9,
-    }).start();
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setFocusedIndex(next);
+      setSettling(false);
+    });
+  };
+  const openFloor = (id: string) => {
+    if (openingFloor.current || floorId) return;
+    openingFloor.current = true;
+    pulse();
+    const node = anchors.current.get(id);
+    const screen = screenRef.current;
+    let opened = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reveal = (origin: { x: number; y: number } | null) => {
+      if (opened) return;
+      opened = true;
+      if (timer) clearTimeout(timer);
+      setFloorClosing(false);
+      setFloorOrigin(origin);
+      setFloorId(id);
+    };
+    timer = setTimeout(() => reveal(null), 700);
+    if (!node || !screen) {
+      reveal(null);
+      return;
+    }
+    screen.measureInWindow((screenX, screenY) => {
+      node.measureInWindow((x, y) => {
+        reveal({ x: x - screenX, y: y - screenY });
+      });
+    });
   };
   const openFromSearch = (id: string) => {
     const index = EVENTS.findIndex((event) => event.id === id);
     setQuery('');
     if (index >= 0) {
       settleRef.current(index, true);
+      setFocusedIndex(index);
       setPhase((current) => (current === 'hyperdrive' ? current : 'orbit'));
+      if (isHappening(EVENTS[index].date)) {
+        setFloorOrigin(null);
+        setFloorClosing(false);
+        setFloorId(id);
+        return;
+      }
     }
     setSelectedId(id);
   };
@@ -212,29 +287,57 @@ export function JourneyScreen() {
   }, [dragX]);
 
   useEffect(() => {
+    if (!floorId) openingFloor.current = false;
+  }, [floorId]);
+
+  useEffect(() => {
+    Animated.timing(chromeOpacity, {
+      toValue: floorId && !floorClosing ? 0 : 1,
+      duration: floorId && !floorClosing ? 220 : 460,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [chromeOpacity, floorClosing, floorId]);
+
+  const warpFade = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
     if (phase !== 'hyperdrive') return undefined;
+    let cancelled = false;
+    warpFade.setValue(1);
     progress.setValue(0);
     Animated.parallel([
       Animated.timing(progress, {
         toValue: 1,
-        duration: 3600,
+        duration: 2800,
         easing: Easing.inOut(Easing.cubic),
         useNativeDriver: false,
       }),
       Animated.sequence([
-        Animated.timing(starsOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(starsOpacity, { toValue: 0.76, duration: 1700, useNativeDriver: true }),
+        Animated.timing(starsOpacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(starsOpacity, { toValue: 0.76, duration: 1400, useNativeDriver: true }),
       ]),
     ]).start();
-    const timer = setTimeout(() => setPhase('orbit'), 3600);
+    const timer = setTimeout(() => {
+      Animated.timing(warpFade, {
+        toValue: 0,
+        duration: 900,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!cancelled && finished) setPhase('orbit');
+      });
+    }, 2800);
     return () => {
+      cancelled = true;
       clearTimeout(timer);
       progress.stopAnimation();
+      warpFade.stopAnimation();
     };
-  }, [phase, progress, starsOpacity]);
+  }, [phase, progress, starsOpacity, warpFade]);
 
   return (
-    <View style={styles.screen}>
+    <View ref={screenRef} style={styles.screen} collapsable={false}>
       <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
       <Hairlines />
       <Animated.View pointerEvents="none" style={[styles.starLayer, { opacity: starsOpacity }]}>
@@ -256,7 +359,7 @@ export function JourneyScreen() {
         ))}
       </Animated.View>
 
-      <View style={[styles.content, { paddingTop: ANDROID_TOP_INSET + 8 }]}>
+      <Animated.View pointerEvents={floorId ? 'none' : 'auto'} style={[styles.content, { paddingTop: ANDROID_TOP_INSET + 8, opacity: chromeOpacity }]}>
         <View style={styles.topBar}>
           <View style={styles.brandGroup}>
             <Logo size={28} />
@@ -271,15 +374,15 @@ export function JourneyScreen() {
           <DirectorySearch query={query} onQuery={setQuery} onSelectEvent={openFromSearch} />
         ) : null}
 
-        {phase === 'hyperdrive' ? (
-          <View style={styles.warpPlaceholder} />
-        ) : query.trim() ? null : phase === 'ready' ? (
+        {query.trim() && phase !== 'hyperdrive' ? null : phase === 'ready' ? (
           <>
           <View style={styles.launchArea} {...launchPanResponder.panHandlers}>
               <View style={styles.launchOrb}>
                 <View style={styles.orbitOuter} />
                 <View style={styles.orbitInner} />
-                <Animated.View {...shipPanResponder.panHandlers} style={[styles.launchShip, { transform: [{ translateY: shipDragY }] }]}><Ship /></Animated.View>
+                <Animated.View {...shipPanResponder.panHandlers} style={[styles.launchShip, { transform: [{ translateY: shipDragY }] }]}>
+                  <View ref={shipRef} collapsable={false}><Ship /></View>
+                </Animated.View>
               </View>
               <Text style={styles.gestureHint}>SWIPE UP TO LAUNCH</Text>
             </View>
@@ -296,26 +399,55 @@ export function JourneyScreen() {
                       event={event}
                       index={index}
                       dragX={dragX}
+                      anchors={anchors}
                       attending={plans.some((item) => item.eventId === event.id)}
                       onPress={() => {
                         const current = clamp(Math.round(positionRef.current / STRIDE), 0, LAST_EVENT);
-                        if (current === index) setSelectedId(event.id);
-                        else settleRef.current(index, true);
+                        if (current !== index) {
+                          settleRef.current(index, true);
+                          return;
+                        }
+                        if (isHappening(event.date) && phase === 'orbit') openFloor(event.id);
+                        else if (!isHappening(event.date)) setSelectedId(event.id);
                       }}
                     />
                   ))}
                 </Animated.View>
               </View>
               <Pressable accessibilityRole="button" accessibilityLabel="Hold spaceship for one and a half seconds to hyperdrive" onPressIn={startHold} onPressOut={endHold} style={({ pressed }) => [styles.dialShip, pressed && styles.dialShipPressed]}>
-                <Ship />
+                <View ref={shipRef} collapsable={false}><Ship /></View>
                 <Text style={styles.dialShipHint}>HOLD TO WARP</Text>
               </Pressable>
+              <EnterFloor
+                visible={showEnter}
+                label={EVENTS[focusedIndex].name}
+                onPress={() => openFloor(EVENTS[focusedIndex].id)}
+              />
             </View>
           </>
         )}
-      </View>
+      </Animated.View>
 
-      {phase === 'hyperdrive' ? <HyperdriveOverlay progress={progress} /> : null}
+      {phase === 'hyperdrive' ? <HyperdriveOverlay progress={progress} fromY={warpFrom} fade={warpFade} /> : null}
+
+      {floorEvent ? (
+        <LiveApproach
+          key={floorEvent.id}
+          event={floorEvent}
+          origin={floorOrigin}
+          presence={floorPresence}
+          onClosing={() => setFloorClosing(true)}
+          onClose={() => {
+            setFloorId(null);
+            setFloorClosing(false);
+          }}
+          onAttend={() => {
+            setSelectedId(floorEvent.id);
+            setFloorId(null);
+            setFloorClosing(false);
+          }}
+        />
+      ) : null}
 
       {selected ? (
         <EventSheet
@@ -348,44 +480,88 @@ export function JourneyScreen() {
               },
             });
           }}
+          onLeave={async () => {
+            if (!user) throw new Error('Signed out');
+            const eventPlans = Object.fromEntries(plans.filter((plan) => plan.eventId !== selected.id).map((plan) => [plan.eventId, {
+              eventName: plan.eventName,
+              role: plan.role,
+              room: plan.room,
+              time: plan.time,
+            }]));
+            await user.updateMetadata({
+              unsafeMetadata: {
+                eventPlans: {
+                  ...eventPlans,
+                  [selected.id]: null,
+                },
+              },
+            });
+          }}
         />
       ) : null}
     </View>
   );
 }
 
-function HyperdriveOverlay({ progress }: { progress: Animated.Value }) {
+function HyperdriveOverlay({ progress, fromY, fade }: { progress: Animated.Value; fromY: number; fade: Animated.Value }) {
   const [percentage, setPercentage] = useState(0);
+  const [vanish, setVanish] = useState({ x: width / 2, y: height * 0.24 });
   const rush = useRef(new Animated.Value(0)).current;
   const climb = useRef(new Animated.Value(0)).current;
+  const searchOpacity = useRef(new Animated.Value(0)).current;
+  const overlayRef = useRef<View>(null);
+  const percentRef = useRef<Text>(null);
 
   useEffect(() => {
     const listener = progress.addListener(({ value }) => setPercentage(Math.min(100, Math.round(value * 100))));
     Animated.timing(rush, { toValue: 1, duration: 3600, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start();
-    Animated.timing(climb, { toValue: 1, duration: 1100, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    return () => progress.removeListener(listener);
-  }, [climb, progress, rush]);
+    Animated.timing(climb, { toValue: 1, duration: 980, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    const search = Animated.sequence([
+      Animated.timing(searchOpacity, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.delay(820),
+      Animated.timing(searchOpacity, { toValue: 0, duration: 420, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+    ]);
+    search.start();
+    return () => {
+      progress.removeListener(listener);
+      search.stop();
+    };
+  }, [climb, progress, rush, searchOpacity]);
 
-  const climbY = climb.interpolate({ inputRange: [0, 1], outputRange: [height * 0.36, 0] });
-  const driftY = rush.interpolate({ inputRange: [0, 1], outputRange: [0, -18] });
-  const shipScale = climb.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
+  const placeVanish = () => {
+    const overlay = overlayRef.current;
+    const label = percentRef.current;
+    if (!overlay || !label) return;
+    overlay.measureInWindow((originX, originY) => {
+      label.measureInWindow((x, y, measuredWidth, measuredHeight) => {
+        setVanish({ x: x + measuredWidth / 2 - originX, y: y + measuredHeight / 2 - originY });
+      });
+    });
+  };
+
+  const climbY = climb.interpolate({ inputRange: [0, 1], outputRange: [fromY - height * 0.5, 0] });
+  const driftY = rush.interpolate({ inputRange: [0, 1], outputRange: [0, -12] });
+  const shipScale = climb.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] });
 
   return (
-    <View pointerEvents="none" style={styles.hyperdriveOverlay}>
+    <Animated.View pointerEvents="none" style={[styles.hyperdriveOverlay, { opacity: fade }]}>
+      <View ref={overlayRef} style={StyleSheet.absoluteFill}>
       {WARP_STREAKS.map((streak, index) => (
-        <HyperdriveStreak key={index} {...streak} />
+        <HyperdriveStreak key={index} {...streak} centerX={vanish.x} centerY={vanish.y} />
       ))}
       <View style={styles.hyperdriveReadout}>
         <Text style={styles.hyperdriveEyebrow}>HYPERDRIVE</Text>
-        <Text style={styles.hyperdrivePercent}>{percentage}</Text>
+        <Text ref={percentRef} onLayout={placeVanish} style={styles.hyperdrivePercent}>{percentage}</Text>
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, { width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} />
         </View>
+        <Animated.Text style={[styles.hyperdriveSearch, { opacity: searchOpacity }]}>Searching for events</Animated.Text>
       </View>
       <Animated.View style={[styles.lockedShip, { transform: [{ translateY: Animated.add(climbY, driftY) }, { scale: shipScale }] }]}>
         <Ship />
       </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -395,12 +571,16 @@ function HyperdriveStreak({
   duration,
   delay,
   thick,
+  centerX,
+  centerY,
 }: {
   turn: number;
   length: number;
   duration: number;
   delay: number;
   thick: boolean;
+  centerX: number;
+  centerY: number;
 }) {
   const travel = useRef(new Animated.Value(0)).current;
   const reach = Math.max(width, height) * 0.78;
@@ -416,7 +596,7 @@ function HyperdriveStreak({
   }, [delay, duration, travel]);
 
   return (
-    <View style={[styles.streakPivot, { transform: [{ rotate: `${turn}deg` }] }]}>
+    <View style={[styles.streakPivot, { left: centerX, top: centerY, transform: [{ rotate: `${turn}deg` }] }]}>
       <Animated.View
         style={[
           styles.hyperdriveStreak,
@@ -439,12 +619,14 @@ function DialEvent({
   event,
   index,
   dragX,
+  anchors,
   attending,
   onPress,
 }: {
   event: EventItem;
   index: number;
   dragX: Animated.Value;
+  anchors: RefObject<Map<string, View>>;
   attending: boolean;
   onPress: () => void;
 }) {
@@ -467,39 +649,78 @@ function DialEvent({
 
   return (
     <Animated.View style={[styles.dialSlot, { left: center, opacity, transform: [{ scale }] }]}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Explore ${event.name}`} onPress={onPress} style={styles.planetHit}>
-        <PlanetBody color={event.color} index={index} />
+      {attending ? <GoingBadge date={event.date} /> : null}
+      <Pressable accessibilityRole="button" accessibilityLabel={isHappening(event.date) ? `Enter ${event.name}` : `Explore ${event.name}`} onPress={onPress} style={styles.planetHit}>
+        <PlanetBody
+          ref={(node) => {
+            if (node) anchors.current.set(event.id, node);
+            else anchors.current.delete(event.id);
+          }}
+          color={event.color}
+          index={index}
+        />
       </Pressable>
       <Animated.View pointerEvents="none" style={[styles.dialEventLabel, { opacity: labelOpacity }]}>
         <Text numberOfLines={2} style={styles.dialEventName}>{event.name}</Text>
         <Text style={styles.dialEventMeta}>{event.date}  ·  {event.place}</Text>
-        {attending ? (
-          <View style={styles.goingRow}>
-            <Text style={styles.check}>✓</Text>
-            <Text style={styles.countdown}>{countdownTo(event.date)}</Text>
-          </View>
-        ) : null}
+        {isHappening(event.date) ? <Text style={styles.liveTag}>Now</Text> : null}
       </Animated.View>
     </Animated.View>
   );
 }
 
-function PlanetBody({ color, index }: { color: string; index: number }) {
-  const tilt = -18 + index * 8;
-  const bandTop = 26 + (index % 3) * 14;
+function GoingBadge({ date }: { date: string }) {
+  const live = isHappening(date);
   return (
-    <View style={styles.planetStage}>
-      <View style={[styles.atmosphere, { borderColor: color }]} />
-      <View style={[styles.planetDisc, { backgroundColor: color }]}>
-        <View style={[styles.planetBand, { top: bandTop, transform: [{ rotate: `${tilt}deg` }] }]} />
-        <View style={[styles.planetBand, styles.planetBandThin, { top: bandTop + 34, transform: [{ rotate: `${tilt}deg` }] }]} />
-        <View style={[styles.crater, { left: 24 + (index % 3) * 10, top: 58 + (index % 2) * 8, width: 16, height: 16 }]} />
-        <View style={[styles.crater, { left: 72, top: 40 + index * 3, width: 9, height: 9 }]} />
-        <View style={styles.terminator} />
-        <View style={styles.glint} />
-      </View>
+    <View pointerEvents="none" style={[styles.goingAbove, live && styles.goingAboveLive]}>
+      {live ? <LiveDot /> : <Text style={styles.check}>✓</Text>}
+      {live ? <Text style={styles.liveBadge}>Live</Text> : <FlipCounter date={date} />}
     </View>
   );
+}
+
+function EnterFloor({ visible, label, onPress }: { visible: boolean; label: string; onPress: () => void }) {
+  const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: visible ? 1 : 0,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [opacity, visible]);
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={[styles.enterFloor, { opacity, transform: [{ translateY: opacity.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Enter ${label}`}
+        onPress={onPress}
+        style={({ pressed }) => [styles.enterFloorButton, pressed && styles.enterFloorPressed]}
+      >
+        <View style={styles.enterLead}>
+          <LiveDot />
+          <Text style={styles.enterFloorText}>Enter the floor</Text>
+        </View>
+        <Text style={styles.enterFloorMark}>→</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function LiveDot() {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(opacity, { toValue: 0.35, duration: 900, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [opacity]);
+  return <Animated.View style={[styles.enterDot, { opacity }]} />;
 }
 
 function Ship() {
@@ -532,14 +753,6 @@ const styles = StyleSheet.create({
   dialTrack: { ...StyleSheet.absoluteFillObject },
   dialSlot: { position: 'absolute', top: '20%', width: PLANET_SIZE, marginLeft: -PLANET_SIZE / 2, alignItems: 'center' },
   planetHit: { width: PLANET_SIZE, height: PLANET_SIZE, alignItems: 'center', justifyContent: 'center' },
-  planetStage: { width: PLANET_SIZE, height: PLANET_SIZE, alignItems: 'center', justifyContent: 'center' },
-  atmosphere: { position: 'absolute', width: PLANET_SIZE + 16, height: PLANET_SIZE + 16, borderRadius: (PLANET_SIZE + 16) / 2, borderWidth: 1, opacity: 0.45 },
-  planetDisc: { width: PLANET_SIZE, height: PLANET_SIZE, borderRadius: PLANET_SIZE / 2, overflow: 'hidden' },
-  planetBand: { position: 'absolute', left: -20, right: -20, height: 12, backgroundColor: 'rgba(0,0,0,0.16)' },
-  planetBandThin: { height: 6, backgroundColor: 'rgba(255,255,255,0.2)' },
-  crater: { position: 'absolute', borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.18)' },
-  terminator: { position: 'absolute', width: PLANET_SIZE, height: PLANET_SIZE, borderRadius: PLANET_SIZE / 2, backgroundColor: 'rgba(0,0,0,0.5)', left: PLANET_SIZE * 0.46 },
-  glint: { position: 'absolute', width: PLANET_SIZE * 0.42, height: PLANET_SIZE * 0.22, borderRadius: PLANET_SIZE, backgroundColor: 'rgba(255,255,255,0.32)', top: PLANET_SIZE * 0.14, left: PLANET_SIZE * 0.12, transform: [{ rotate: '-22deg' }] },
   dialHint: { position: 'absolute', bottom: 148, alignSelf: 'center', color: '#B9ACD7', fontSize: 10, fontWeight: '600', letterSpacing: 1.6 },
   dialPlanet: { position: 'absolute', top: '38%', zIndex: 2, alignItems: 'center' },
   dialPlanetActive: { left: '50%', marginLeft: -40, top: '35%' },
@@ -551,12 +764,22 @@ const styles = StyleSheet.create({
   dialEventLabel: { position: 'absolute', top: PLANET_SIZE + 18, width: TRACK * 0.78, left: (PLANET_SIZE - TRACK * 0.78) / 2, alignItems: 'center' },
   dialEventName: { color: theme.fg, fontSize: 22, fontWeight: '300', letterSpacing: -0.3, textAlign: 'center' },
   dialEventMeta: { color: theme.muted, fontSize: 12, marginTop: 6, textAlign: 'center' },
-  goingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8 },
+  goingAbove: { position: 'absolute', top: -46, width: 220, left: (PLANET_SIZE - 220) / 2, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
+  goingAboveLive: { top: -28 },
+  liveTag: { color: '#8fd18a', fontSize: 10, fontWeight: '500', letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 6 },
+  liveBadge: { color: '#8fd18a', fontSize: 12, fontWeight: '500', letterSpacing: 1.2, textTransform: 'uppercase' },
   check: { color: '#6FCF97', fontSize: 16, fontWeight: '700' },
   countdown: { color: '#6FCF97', fontSize: 13, fontWeight: '500' },
   dialShip: { position: 'absolute', bottom: 28, alignSelf: 'center', alignItems: 'center', paddingHorizontal: 16, zIndex: 4 },
   dialShipPressed: { opacity: 0.72 },
   dialShipHint: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.6, marginTop: 8 },
+  enterFloor: { position: 'absolute', left: 0, right: 0, bottom: 236, zIndex: 6, elevation: 12 },
+  enterFloorButton: { minHeight: 52, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(143,209,138,0.7)', backgroundColor: 'rgba(7,7,7,0.82)' },
+  enterFloorPressed: { opacity: 0.6 },
+  enterLead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  enterDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8fd18a' },
+  enterFloorText: { color: theme.fg, fontSize: 16, fontWeight: '400' },
+  enterFloorMark: { color: theme.fg, fontSize: 16, fontWeight: '300' },
   orbitLine: { position: 'absolute', width: '110%', height: width * 0.72, borderRadius: width, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(190,174,255,0.14)', left: '-5%', top: '26%', transform: [{ rotate: '-18deg' }] },
   orbitLineSmall: { width: '78%', height: width * 0.49, left: '11%', top: '36%', borderColor: 'rgba(190,174,255,0.09)', transform: [{ rotate: '18deg' }] },
   orbitLineWide: { width: '100%', height: width * 0.92, left: '0%', top: '17%', borderColor: 'rgba(255,255,255,0.05)', transform: [{ rotate: '8deg' }] },
@@ -574,12 +797,13 @@ const styles = StyleSheet.create({
   hyperdriveOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 5, backgroundColor: theme.bg },
   hyperdriveStreak: { width: 1, marginLeft: -0.5, backgroundColor: '#f5f5f5' },
   hyperdriveStreakBright: { width: 2, marginLeft: -1, backgroundColor: '#ffffff' },
-  streakPivot: { position: 'absolute', left: width / 2, top: VANISH_Y, width: 0, height: 0 },
-  hyperdriveReadout: { position: 'absolute', top: '16%', left: 0, right: 0, alignItems: 'center' },
+  streakPivot: { position: 'absolute', width: 0, height: 0 },
+  hyperdriveReadout: { position: 'absolute', top: '16%', left: 0, right: 0, alignItems: 'center', zIndex: 3 },
   hyperdriveEyebrow: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 2.2, marginBottom: 10 },
+  hyperdriveSearch: { color: theme.faint, fontSize: 10, fontWeight: '500', letterSpacing: 1.8, textTransform: 'uppercase', marginTop: 22 },
   hyperdrivePercent: { color: theme.fg, fontSize: 72, lineHeight: 76, fontWeight: '200', letterSpacing: -1.6, fontVariant: ['tabular-nums'] },
   progressTrack: { width: 96, height: StyleSheet.hairlineWidth, backgroundColor: theme.line, marginTop: 16 },
   progressFill: { height: StyleSheet.hairlineWidth, backgroundColor: theme.fg },
-  lockedShip: { position: 'absolute', left: 0, right: 0, top: height * 0.5, alignItems: 'center' },
+  lockedShip: { position: 'absolute', left: 0, right: 0, top: height * 0.5, alignItems: 'center', zIndex: 2 },
   warpPlaceholder: { flex: 1 },
 });
