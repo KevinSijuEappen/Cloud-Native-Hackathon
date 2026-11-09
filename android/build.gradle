@@ -21,4 +21,6 @@ allprojects {
 }
 
 apply plugin: "expo-root-project"
+// Use the Android NDK already installed on this development machine.
+ext.ndkVersion = "27.0.12077973"
 apply plugin: "com.facebook.react.rootproject"
